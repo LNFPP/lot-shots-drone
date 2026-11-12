@@ -610,9 +610,9 @@ public class BubbleService extends Service {
 
         String msg;
         if (assigned) {
-            String next = store.nextUnshot(community, date, lot);
-            store.setCurrentLot(next);
-            msg = "✓ Lot " + lot + " saved" + (next.isEmpty() ? " — all lots done!" : "  → next: Lot " + next);
+            // You choose every lot yourself: clear it so the next 360 can't land on the wrong lot.
+            store.setCurrentLot("");
+            msg = "✓ Lot " + lot + " saved";
         } else {
             msg = "360 saved as UNASSIGNED — pick a lot and tap Re-tag";
         }
@@ -682,11 +682,10 @@ public class BubbleService extends Service {
             store.setLog(log);
             MediaScannerConnection.scanFile(this, new String[]{old.getAbsolutePath(), nd.getAbsolutePath()}, null, null);
 
-            String next = store.nextUnshot(community, e.optString("date"), lot);
-            store.setCurrentLot(next);
+            store.setCurrentLot("");
             updateBubble();
             flashBubble();
-            toast("↺ Lot " + oldLot + " → Lot " + lot + (next.isEmpty() ? "" : "  → next: Lot " + next));
+            toast("↺ Lot " + oldLot + " → Lot " + lot);
             notifyChange();
         });
     }

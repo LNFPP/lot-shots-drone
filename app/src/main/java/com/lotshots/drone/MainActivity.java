@@ -391,7 +391,7 @@ public class MainActivity extends Activity {
             section("Shooting " + prettyDate(date));
             LinearLayout r = row();
             String cur = store.currentLot();
-            r.addView(text("Next: " + (cur.isEmpty() ? "Lot __" : "Lot " + cur), 20, Color.WHITE, true), new LinearLayout.LayoutParams(0, -2, 1));
+            r.addView(text("Set: " + (cur.isEmpty() ? "Lot __" : "Lot " + cur), 20, Color.WHITE, true), new LinearLayout.LayoutParams(0, -2, 1));
             r.addView(button("Change", 0xFF333333, v -> pickLot()));
             root.addView(r);
 
@@ -425,10 +425,7 @@ public class MainActivity extends Activity {
         boolean changed = !community.equals(store.active()) || !date.equals(store.activeDate());
         store.setActive(community);
         store.setActiveDate(date);
-        List<String> lots = store.lots(community);
-        if (changed || store.currentLot().isEmpty()) {
-            store.setCurrentLot(lots.isEmpty() ? "" : store.nextUnshot(community, date, lots.get(lots.size() - 1)));
-        }
+        if (changed) store.setCurrentLot("");
         restartBubbleIfRunning();
         render();
     }
@@ -526,8 +523,7 @@ public class MainActivity extends Activity {
                     if (existing == null && replaced != null) toast("Updated existing community " + replaced);
                     if (store.active().equalsIgnoreCase(n)) {
                         store.setActive(n);
-                        if (!parsed.contains(store.currentLot()))
-                            store.setCurrentLot(store.nextUnshot(n, store.activeDate(), parsed.get(parsed.size() - 1)));
+                        if (!parsed.contains(store.currentLot())) store.setCurrentLot("");
                     }
                     toast(n + ": " + parsed.size() + " lots");
                     restartBubbleIfRunning();

@@ -33,8 +33,8 @@ For updates, open the same link again. The app installs over the old version and
 - Tap the blue **Lot __** bubble to open the number pad. Type the lot number and tap **✓ Set lot**.
   The bubble then shows that lot. Drag the bubble anywhere.
 - The pad warns you if the lot already has a 360 or isn't in the community's list.
-- When the stitch finishes, the bubble flashes green, the file is named, and the bubble moves to the next lot without a 360.
-  Type a different number any time to override it.
+- When the stitch finishes, the bubble turns green and pops, the copy is named, and the bubble goes back to **Lot __**.
+  Set the lot again before each 360.
 - If you forgot to set the lot first, open the pad, type the correct number, then tap **↺ Re-tag last 360**.
 
 ## Where files go
