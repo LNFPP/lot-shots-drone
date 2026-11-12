@@ -411,7 +411,13 @@ public class BubbleService extends Service {
             status.setGravity(Gravity.CENTER);
             status.setPadding(0, dp(4), 0, dp(4));
 
+            final TextView[] setBtn = new TextView[1];
             final Runnable refresh = () -> {
+                if (setBtn[0] != null) {
+                    boolean stopMode = typed.length() == 0 && !current.isEmpty();
+                    setBtn[0].setText(stopMode ? "\u25A0  Stop Lot " + current : "\u2713  Set lot");
+                    setBtn[0].setBackground(rounded(stopMode ? 0xFFC62828 : 0xFF1565C0, 8));
+                }
                 String t = typed.toString();
                 display.setText("Lot " + (t.isEmpty() ? "__" : t));
                 if (t.isEmpty()) {
@@ -469,7 +475,15 @@ public class BubbleService extends Service {
             TextView set = chip("\u2713  Set lot", 0xFF1565C0, v -> {
                 String t = typed.toString();
                 if (t.isEmpty()) {
-                    toast("Type a lot number first");
+                    if (current.isEmpty()) {
+                        toast("Type a lot number first");
+                        return;
+                    }
+                    // Pressed again with nothing typed: stop watching for this lot.
+                    store.setCurrentLot("");
+                    updateBubble();
+                    closePanel();
+                    notifyChange();
                     return;
                 }
                 store.setCurrentLot(t);
@@ -478,6 +492,8 @@ public class BubbleService extends Service {
                 notifyChange();
             });
             set.setTextSize(18);
+            setBtn[0] = set;
+            refresh.run();
             LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(56));
             sp.setMargins(0, dp(4), 0, dp(6));
             side.addView(set, sp);
