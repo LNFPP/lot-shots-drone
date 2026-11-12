@@ -32,4 +32,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest LotShots.apk --title "Lot Shots (latest)" --notes "Built from ${GITHUB_SHA::7}" --latest
+          gh release create latest LotShots.apk --title "Lot Shots (latest)" --notes "build=${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" --latest

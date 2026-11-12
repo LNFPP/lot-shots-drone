@@ -208,7 +208,14 @@ public class MainActivity extends Activity {
     }
 
     private void renderHome() {
-        root.addView(text("Lot Shots — Drone", 24, Color.WHITE, true));
+        LinearLayout top = row();
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.addView(text("Lot Shots \u2014 Drone", 24, Color.WHITE, true));
+        titles.addView(text("Version " + myVersionName() + "  (build " + myBuild() + ")", 12, 0xFF888888, false));
+        top.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(button("\u21BB  Check for update", 0xFF333333, v -> checkForUpdate()));
+        root.addView(top);
 
         // --- setup (only shown until everything is allowed)
         if (!hasOverlay() || !hasFiles()) {
@@ -663,6 +670,85 @@ public class MainActivity extends Activity {
         } catch (Exception ex) {
             toast("Export failed: " + ex.getMessage());
         }
+    }
+
+    // ------------------------------------------------------------------ updates
+
+    private static final String RELEASE_API = "https://api.github.com/repos/LNFPP/lot-shots-drone/releases/latest";
+    private static final String APK_URL = "https://github.com/LNFPP/lot-shots-drone/releases/latest/download/LotShots.apk";
+
+    private long myBuild() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private String myVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private void checkForUpdate() {
+        AlertDialog wait = new AlertDialog.Builder(this).setMessage("Checking for updates\u2026").setCancelable(false).show();
+        new Thread(() -> {
+            long latest = -1;
+            String error = null;
+            try {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(RELEASE_API).openConnection();
+                c.setRequestProperty("User-Agent", "LotShots-Drone");
+                c.setRequestProperty("Accept", "application/vnd.github+json");
+                c.setConnectTimeout(10000);
+                c.setReadTimeout(10000);
+                int code = c.getResponseCode();
+                if (code != 200) throw new Exception("GitHub replied " + code);
+                StringBuilder sb = new StringBuilder();
+                try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(), "UTF-8"))) {
+                    String line;
+                    while ((line = r.readLine()) != null) sb.append(line);
+                }
+                String body = new JSONObject(sb.toString()).optString("body", "");
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("build=(\\d+)").matcher(body);
+                if (m.find()) latest = Long.parseLong(m.group(1));
+                else throw new Exception("couldn't read the latest build number");
+            } catch (Exception ex) {
+                error = ex.getMessage();
+            }
+            final long latestBuild = latest;
+            final String err = error;
+            runOnUiThread(() -> {
+                wait.dismiss();
+                if (err != null) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Couldn't check for updates")
+                            .setMessage("Make sure the controller is on Wi-Fi and try again.\n\n(" + err + ")")
+                            .setPositiveButton("OK", null).show();
+                } else if (latestBuild <= myBuild()) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("No update available")
+                            .setMessage("You have the latest version (build " + myBuild() + ").")
+                            .setPositiveButton("OK", null).show();
+                } else {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Update available")
+                            .setMessage("Build " + latestBuild + " is available (you have build " + myBuild() + ").\n\n"
+                                    + "Update now? The download opens in your browser \u2014 tap it when it finishes, then Install. "
+                                    + "Your communities and dates are kept.")
+                            .setPositiveButton("Yes, update", (d, w) -> {
+                                try {
+                                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(APK_URL)));
+                                } catch (Exception ex) {
+                                    toast("No browser found to open the download");
+                                }
+                            })
+                            .setNegativeButton("Not now", null).show();
+                }
+            });
+        }).start();
     }
 
     private static String csv(String s) {
