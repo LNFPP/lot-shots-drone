@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.lotshots.drone'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.lotshots.drone"
+        minSdk 26
+        // Target 29 (Android 10) on purpose: the DJI RC Pro runs Android 10, and this
+        // lets the app read/write the controller's shared storage directly.
+        targetSdk 29
+        versionCode 1
+        versionName "1.0"
+    }
+
+    // One fixed key, so every new build installs over the old one (keeps your communities and log).
+    signingConfigs {
+        lotshots {
+            storeFile file('lotshots.keystore')
+            storePassword 'lotshots'
+            keyAlias 'lotshots'
+            keyPassword 'lotshots'
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.lotshots
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
