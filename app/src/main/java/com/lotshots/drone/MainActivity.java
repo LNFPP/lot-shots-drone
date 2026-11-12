@@ -296,7 +296,34 @@ public class MainActivity extends Activity {
         only.setChecked(store.only360());
         only.setOnCheckedChangeListener((b, c) -> store.setOnly360(c));
         root.addView(only);
-        root.addView(text("Copies are saved to DCIM/LotShots/<Community>/<Date>/. DJI Fly's originals are never changed.", 13, 0xFFBBBBBB, false));
+        section("Save 360s to");
+        boolean sd = Store.onSdCard();
+        addButtons(button((sd ? "\u25CB" : "\u25C9") + "  Controller", sd ? 0xFF333333 : 0xFF1565C0, v -> {
+                    store.setSaveRoot(null);
+                    toast("Saving to controller storage");
+                    render();
+                }),
+                button((sd ? "\u25C9" : "\u25CB") + "  microSD card", sd ? 0xFF1565C0 : 0xFF333333, v -> {
+                    String r = Store.findSdRoot(this);
+                    if (r == null) {
+                        toast("No microSD card found (or it can't be written to)");
+                        return;
+                    }
+                    store.setSaveRoot(r);
+                    render();
+                    if (r.contains("/Android/data/")) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("Saving to microSD")
+                                .setMessage("The controller only lets Lot Shots save inside its own folder on the card:\n\n"
+                                        + r + "\n\nOn your Mac, open the card and go to Android \u2192 data \u2192 com.lotshots.drone \u2192 files \u2192 LotShots.\n\n"
+                                        + "Important: copy your 360s off before uninstalling Lot Shots \u2014 Android deletes this folder on uninstall. (Updating from the GitHub link is fine.)")
+                                .setPositiveButton("OK", null).show();
+                    } else {
+                        toast("Saving to microSD: " + r);
+                    }
+                }));
+        root.addView(text("Folder: " + Store.outputRoot().getAbsolutePath() + "/<Community>/<Date>/", 13, 0xFFBBBBBB, false));
+        root.addView(text("DJI Fly's originals are never changed. Switching location starts fresh date folders there.", 12, 0xFF888888, false));
         if (store.log().length() > 0) addButtons(button("Export log CSV", 0xFF333333, v -> exportCsv()));
     }
 

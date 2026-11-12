@@ -19,8 +19,61 @@ import java.util.Set;
 /** All saved app state, kept in SharedPreferences as JSON. Shared by the screen and the bubble. */
 public class Store {
 
-    public static File outputRoot() {
+    /** null = controller storage (DCIM/LotShots). Otherwise a folder on the microSD card. */
+    private static volatile String saveRoot = null;
+
+    public static File internalRoot() {
         return new File(Environment.getExternalStorageDirectory(), "DCIM/LotShots");
+    }
+
+    public static File outputRoot() {
+        String r = saveRoot;
+        return r != null ? new File(r) : internalRoot();
+    }
+
+    public static boolean onSdCard() {
+        return saveRoot != null;
+    }
+
+    public void setSaveRoot(String r) {
+        saveRoot = r;
+        if (r == null) sp.edit().remove("saveRoot").apply();
+        else sp.edit().putString("saveRoot", r).apply();
+    }
+
+    /**
+     * Finds a writable LotShots folder on the microSD card. Tries the card's top level first
+     * (easy to find in Finder); if the controller doesn't allow that, uses this app's own folder on the card.
+     * Returns null if there's no card.
+     */
+    public static String findSdRoot(Context c) {
+        File[] dirs = c.getExternalFilesDirs(null);
+        if (dirs == null) return null;
+        for (int i = 1; i < dirs.length; i++) {
+            File appDir = dirs[i];
+            if (appDir == null) continue;
+            String p = appDir.getAbsolutePath();
+            int cut = p.indexOf("/Android/data");
+            if (cut > 0) {
+                File top = new File(p.substring(0, cut), "LotShots");
+                if (writable(top)) return top.getAbsolutePath();
+            }
+            File inApp = new File(appDir, "LotShots");
+            if (writable(inApp)) return inApp.getAbsolutePath();
+        }
+        return null;
+    }
+
+    private static boolean writable(File dir) {
+        try {
+            if (!dir.exists() && !dir.mkdirs()) return false;
+            File t = new File(dir, ".lotshots_test");
+            if (!t.createNewFile() && !t.exists()) return false;
+            t.delete();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public static File exportDir() {
@@ -32,6 +85,7 @@ public class Store {
 
     public Store(Context c) {
         sp = c.getApplicationContext().getSharedPreferences("lotshots", Context.MODE_PRIVATE);
+        saveRoot = sp.getString("saveRoot", null);
     }
 
     // ---------- communities ----------
