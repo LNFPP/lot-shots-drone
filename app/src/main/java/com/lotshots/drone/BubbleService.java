@@ -1,5 +1,9 @@
 package com.lotshots.drone;
 
+import android.animation.Animator;
+import android.animation.AnimatorSet;
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -21,6 +25,9 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.DecelerateInterpolator;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -53,7 +60,7 @@ public class BubbleService extends Service {
 
     private static final long POLL_MS = 2500;
     private static final int BLUE = 0xE61565C0;
-    private static final int GREEN = 0xE62E7D32;
+    private static final int GREEN = 0xF243A047;
 
     private Store store;
     private WindowManager wm;
@@ -61,7 +68,18 @@ public class BubbleService extends Service {
     private HandlerThread watchThread;
     private Handler watch;
 
+    private static final int BUBBLE_DP = 64;
+    private static final int WINDOW_DP = 80;
+    private static final ArgbEvaluator ARGB = new ArgbEvaluator();
+
+    private FrameLayout bubbleFrame;
     private TextView bubble;
+    private GradientDrawable bubbleBg;
+    private int fillColor = BLUE;
+    private boolean watching = false;
+    private float strobeT = 0f;
+    private ValueAnimator strobe;
+    private Animator fillAnim;
     private WindowManager.LayoutParams bubbleParams;
     private View panel;
 
@@ -102,9 +120,11 @@ public class BubbleService extends Service {
     public void onDestroy() {
         running = false;
         closePanel();
-        if (bubble != null) {
+        if (strobe != null) strobe.cancel();
+        if (fillAnim != null) fillAnim.cancel();
+        if (bubbleFrame != null) {
             try {
-                wm.removeView(bubble);
+                wm.removeView(bubbleFrame);
             } catch (Exception ignored) {
             }
         }
@@ -162,19 +182,25 @@ public class BubbleService extends Service {
     // ------------------------------------------------------------------ bubble
 
     private void makeBubble() {
+        // The window is a bit bigger than the bubble so the "pop" animation has room and isn't clipped.
+        bubbleFrame = new FrameLayout(this);
         bubble = new TextView(this);
         bubble.setGravity(Gravity.CENTER);
         bubble.setTextColor(Color.WHITE);
         bubble.setTextSize(13);
         bubble.setTypeface(Typeface.DEFAULT_BOLD);
-        bubble.setBackground(circle(BLUE));
+        bubbleBg = new GradientDrawable();
+        bubbleBg.setShape(GradientDrawable.OVAL);
+        bubble.setBackground(bubbleBg);
+        applyBubbleStyle();
+        bubbleFrame.addView(bubble, new FrameLayout.LayoutParams(dp(BUBBLE_DP), dp(BUBBLE_DP), Gravity.CENTER));
 
-        bubbleParams = new WindowManager.LayoutParams(dp(64), dp(64), overlayType(),
+        bubbleParams = new WindowManager.LayoutParams(dp(WINDOW_DP), dp(WINDOW_DP), overlayType(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
         bubbleParams.gravity = Gravity.TOP | Gravity.START;
-        bubbleParams.x = dp(12);
-        bubbleParams.y = dp(110);
+        bubbleParams.x = dp(4);
+        bubbleParams.y = dp(100);
 
         bubble.setOnTouchListener(new View.OnTouchListener() {
             int startX, startY;
@@ -198,7 +224,7 @@ public class BubbleService extends Service {
                         if (moved) {
                             bubbleParams.x = startX + dx;
                             bubbleParams.y = startY + dy;
-                            wm.updateViewLayout(bubble, bubbleParams);
+                            wm.updateViewLayout(bubbleFrame, bubbleParams);
                         }
                         return true;
                     case MotionEvent.ACTION_UP:
@@ -209,8 +235,43 @@ public class BubbleService extends Service {
             }
         });
 
-        wm.addView(bubble, bubbleParams);
+        wm.addView(bubbleFrame, bubbleParams);
         updateBubble();
+    }
+
+    // ---- bubble look: blue fill, red outline that gently pulses while a lot is set (= watching)
+
+    private void applyBubbleStyle() {
+        if (bubbleBg == null) return;
+        bubbleBg.setColor(fillColor);
+        if (watching) {
+            int stroke = (Integer) ARGB.evaluate(strobeT, 0x55FF5252, 0xFFFF1744);
+            bubbleBg.setStroke(dp(3), stroke);
+        } else {
+            bubbleBg.setStroke(dp(2), Color.WHITE);
+        }
+    }
+
+    private void setWatching(boolean w) {
+        if (w == watching) return;
+        watching = w;
+        if (strobe != null) {
+            strobe.cancel();
+            strobe = null;
+        }
+        if (w) {
+            strobe = ValueAnimator.ofFloat(0f, 1f);
+            strobe.setDuration(1100);
+            strobe.setRepeatCount(ValueAnimator.INFINITE);
+            strobe.setRepeatMode(ValueAnimator.REVERSE);
+            strobe.setInterpolator(new AccelerateDecelerateInterpolator());
+            strobe.addUpdateListener(an -> {
+                strobeT = (float) an.getAnimatedValue();
+                applyBubbleStyle();
+            });
+            strobe.start();
+        }
+        applyBubbleStyle();
     }
 
     private GradientDrawable circle(int color) {
@@ -233,16 +294,41 @@ public class BubbleService extends Service {
             if (bubble == null) return;
             String lot = store.currentLot();
             bubble.setText("Lot\n" + (lot.isEmpty() ? "__" : lot));
+            setWatching(!lot.isEmpty());
         });
     }
 
+    /** 360 copied: fill turns green, a small "pop", then the green fades back to blue. */
     private void flashBubble() {
         main.post(() -> {
             if (bubble == null) return;
-            bubble.setBackground(circle(GREEN));
-            main.postDelayed(() -> {
-                if (bubble != null) bubble.setBackground(circle(BLUE));
-            }, 2500);
+            if (fillAnim != null) fillAnim.cancel();
+
+            ValueAnimator toGreen = ValueAnimator.ofObject(ARGB, fillColor, GREEN);
+            toGreen.setDuration(180);
+            ValueAnimator toBlue = ValueAnimator.ofObject(ARGB, GREEN, BLUE);
+            toBlue.setStartDelay(900);
+            toBlue.setDuration(1400);
+            toBlue.setInterpolator(new AccelerateDecelerateInterpolator());
+            ValueAnimator.AnimatorUpdateListener l = an -> {
+                fillColor = (Integer) an.getAnimatedValue();
+                applyBubbleStyle();
+            };
+            toGreen.addUpdateListener(l);
+            toBlue.addUpdateListener(l);
+            AnimatorSet set = new AnimatorSet();
+            set.playSequentially(toGreen, toBlue);
+            fillAnim = set;
+            set.start();
+
+            bubble.animate().cancel();
+            bubble.setScaleX(1f);
+            bubble.setScaleY(1f);
+            bubble.animate().scaleX(1.15f).scaleY(1.15f).setDuration(170)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(() -> bubble.animate().scaleX(1f).scaleY(1f).setDuration(320)
+                            .setInterpolator(new AccelerateDecelerateInterpolator()).start())
+                    .start();
         });
     }
 
@@ -416,7 +502,7 @@ public class BubbleService extends Service {
         WindowManager.LayoutParams p = new WindowManager.LayoutParams(w, WindowManager.LayoutParams.WRAP_CONTENT,
                 overlayType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
         p.gravity = Gravity.TOP | Gravity.START;
-        int x = bubbleParams.x + dp(72);
+        int x = bubbleParams.x + dp(WINDOW_DP);
         if (x + w > screenW) x = Math.max(0, bubbleParams.x - w - dp(8));
         p.x = x;
         p.y = Math.max(0, Math.min(bubbleParams.y, screenH - dp(300)));
