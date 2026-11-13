@@ -174,7 +174,7 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ navigation
 
     private static final String HOME = "home", SETTINGS = "settings", COMMUNITIES = "communities",
-            COMMUNITY = "community", FLIGHTS = "flights", FLIGHT_DATE = "flightDate";
+            COMMUNITY = "community", FLIGHTS = "flights", FLIGHT_DATE = "flightDate", WHAT_CHANGED = "whatChanged";
     private String screen = HOME;
     private String openCommunity = null;
     private String openFlightDate = null;
@@ -203,6 +203,9 @@ public class MainActivity extends Activity {
                 break;
             case FLIGHT_DATE:
                 go(FLIGHTS);
+                break;
+            case WHAT_CHANGED:
+                go(SETTINGS);
                 break;
             case HOME:
                 super.onBackPressed();
@@ -241,6 +244,9 @@ public class MainActivity extends Activity {
                 break;
             case FLIGHT_DATE:
                 renderFlightDate(openFlightDate);
+                break;
+            case WHAT_CHANGED:
+                renderWhatChanged();
                 break;
             default:
                 screen = HOME;
@@ -403,6 +409,21 @@ public class MainActivity extends Activity {
         root.addView(text("Folder: " + Store.outputRoot().getAbsolutePath() + "/<Community>/<Date>/", 13, 0xFFBBBBBB, false));
         root.addView(text("Only 360 spheres are copied. DJI Fly's originals are never changed.", 12, 0xFF888888, false));
         if (store.log().length() > 0) addButtons(button("Export 360 log CSV", 0xFF333333, v -> exportCsv()));
+
+        section("Test: What changed?");
+        root.addView(text("Finds where DJI Fly keeps photo previews on the controller and what's in them.", 13, 0xFFBBBBBB, false));
+        if (WhatChanged.before == null) {
+            root.addView(text("1. Tap Start   2. In DJI Fly take one regular photo, then one 360 (wait for it to finish)   3. Come back and tap Stop", 12, 0xFF888888, false));
+            addButtons(button("▶  Start test", 0xFF2E7D32, v -> startWhatChanged()));
+        } else {
+            root.addView(text("● Test running since " + clock(WhatChanged.startedAt) + " — take one regular photo and one 360 in DJI Fly, then tap Stop.", 13, 0xFFFFCDD2, true));
+            addButtons(button("■  Stop & show results", 0xFFC62828, v -> stopWhatChanged()),
+                    button("Cancel", 0xFF333333, v -> {
+                        WhatChanged.before = null;
+                        render();
+                    }));
+        }
+        if (WhatChanged.lastReport != null) addButtons(button("Show last results", 0xFF333333, v -> go(WHAT_CHANGED)));
 
         section("App");
         root.addView(text("Version " + myVersionName() + "  (build " + myBuild() + ")", 14, Color.WHITE, false));
@@ -1169,6 +1190,93 @@ public class MainActivity extends Activity {
             toast("Saved " + out.getAbsolutePath());
         } catch (Exception ex) {
             toast("Export failed: " + ex.getMessage());
+        }
+    }
+
+    // ------------------------------------------------------------------ "What changed?" test
+
+    private void startWhatChanged() {
+        if (!hasFiles()) {
+            toast("Allow photo access first (Permissions)");
+            return;
+        }
+        AlertDialog wait = new AlertDialog.Builder(this).setMessage("Taking a snapshot of the controller's files…").setCancelable(false).show();
+        new Thread(() -> {
+            java.util.Map<String, long[]> snap = WhatChanged.snapshot(WhatChanged.roots(this));
+            runOnUiThread(() -> {
+                wait.dismiss();
+                WhatChanged.before = snap;
+                WhatChanged.startedAt = System.currentTimeMillis();
+                new AlertDialog.Builder(this)
+                        .setTitle("Test started")
+                        .setMessage("Checked " + snap.size() + " files.\n\nNow switch to DJI Fly and take:\n1. One regular photo\n2. One 360 — wait until it finishes\n\nThen come back to Lot Shots → Settings → Stop & show results.")
+                        .setPositiveButton("OK", null).show();
+                render();
+            });
+        }).start();
+    }
+
+    private void stopWhatChanged() {
+        AlertDialog wait = new AlertDialog.Builder(this).setMessage("Looking for what changed…").setCancelable(false).show();
+        new Thread(() -> {
+            java.util.Map<String, long[]> after = WhatChanged.snapshot(WhatChanged.roots(this));
+            String report = WhatChanged.report(this, after);
+            String saved;
+            try {
+                File dir = new File(Environment.getExternalStorageDirectory(), "Documents/LotShots");
+                dir.mkdirs();
+                File out = new File(dir, "WhatChanged_" + new SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(new Date()) + ".txt");
+                try (FileWriter w = new FileWriter(out)) {
+                    w.write(report);
+                }
+                saved = out.getAbsolutePath();
+            } catch (Exception e) {
+                saved = null;
+            }
+            final String savedPath = saved;
+            runOnUiThread(() -> {
+                wait.dismiss();
+                WhatChanged.lastReport = report;
+                WhatChanged.before = null;
+                if (savedPath != null) toast("Saved " + savedPath);
+                go(WHAT_CHANGED);
+            });
+        }).start();
+    }
+
+    private void renderWhatChanged() {
+        backButton("Settings", SETTINGS);
+        title("What changed?");
+        addButtons(button("⇪  Send report to Mac", 0xFF1565C0, v -> sendReport()));
+        String r = WhatChanged.lastReport == null ? "No results yet." : WhatChanged.lastReport;
+        TextView t = text(r, 12, 0xFFDDDDDD, false);
+        t.setTypeface(android.graphics.Typeface.MONOSPACE);
+        t.setTextIsSelectable(true);
+        t.setPadding(0, dp(10), 0, 0);
+        root.addView(t);
+    }
+
+    private void sendReport() {
+        if (WhatChanged.lastReport == null) return;
+        try {
+            String name = "WhatChanged_" + new SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(new Date()) + ".txt";
+            File f = new File(ShareProvider.shareDir(this), name);
+            try (FileWriter w = new FileWriter(f)) {
+                w.write(WhatChanged.lastReport);
+            }
+            android.net.Uri uri = ShareProvider.uriFor(f);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.setClipData(android.content.ClipData.newRawUri(name, uri));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try {
+                startActivity(new Intent(send).setPackage(LOCALSEND_PKG));
+            } catch (android.content.ActivityNotFoundException ex) {
+                startActivity(Intent.createChooser(send, "Send report"));
+            }
+        } catch (Exception e) {
+            toast("Couldn't send: " + e.getMessage());
         }
     }
 
