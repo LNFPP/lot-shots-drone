@@ -919,6 +919,100 @@ public class MainActivity extends Activity {
         if (!ws.isEmpty()) root.addView(text("Before Match 360s: open DJI Fly's album and scroll past today's 360s.", 12, C_MUTED, false));
     }
 
+    private interface MatchDone {
+        void done(LotMatcher.Result r);
+    }
+
+    private void runMatch(String community, String date, MatchDone then) {
+        if (!hasFiles()) {
+            toast("Allow photo access first (Settings → Permissions)");
+            return;
+        }
+        AlertDialog wait = new AlertDialog.Builder(this).setMessage("Matching 360s to lots…").setCancelable(false).show();
+        new Thread(() -> {
+            LotMatcher.Result r = LotMatcher.match(store, community, date);
+            runOnUiThread(() -> {
+                wait.dismiss();
+                then.done(r);
+            });
+        }).start();
+    }
+
+    private String matchSummary(LotMatcher.Result r) {
+        SimpleDateFormat fmt = new SimpleDateFormat("h:mm:ss a", Locale.US);
+        StringBuilder sb = new StringBuilder();
+        if (!r.folderReadable) sb.append("⚠ Can't read DJI Fly's preview folder.\n\n");
+        int matched = 0;
+        for (LotMatcher.Row row : r.rows) if (!row.panos.isEmpty()) matched++;
+        sb.append(matched).append(" of ").append(r.rows.size()).append(" lots matched to a 360\n\n");
+        for (LotMatcher.Row row : r.rows) {
+            String lot = row.window.optString("lot");
+            if (row.panos.isEmpty()) {
+                sb.append("✗ Lot ").append(lot).append(" — no 360 found\n");
+            } else {
+                for (LotMatcher.Pano p : row.panos) {
+                    sb.append("✓ Lot ").append(lot).append(" → ").append(p.droneFile.replace(".JPG", ""))
+                            .append("  (started ").append(fmt.format(new Date(p.started))).append(")\n");
+                }
+                if (row.panos.size() > 1) sb.append("   ⚠ ").append(row.panos.size()).append(" 360s in this lot\n");
+            }
+        }
+        if (!r.unmatched.isEmpty()) {
+            sb.append("\n360s not in any lot window:\n");
+            for (LotMatcher.Pano p : r.unmatched) sb.append("  ").append(p.droneFile.replace(".JPG", "")).append("  (").append(fmt.format(new Date(p.started))).append(")\n");
+        }
+        if (r.pano360sThatDay == 0) sb.append("\nNo 360 previews found for this date. Open DJI Fly's album (scroll past today's 360s) and try again.");
+        return sb.toString();
+    }
+
+    private void showMatch(String community, String date) {
+        runMatch(community, date, r -> new AlertDialog.Builder(this)
+                .setTitle(community + " · " + prettyDate(date))
+                .setMessage(matchSummary(r))
+                .setPositiveButton("OK", null)
+                .setNeutralButton("Send CSV to Mac", (d, w) -> exportLotCsv(community, date))
+                .show());
+    }
+
+    /** Matches, saves the CSV next to the date, and opens LocalSend with it. */
+    private void exportLotCsv(String community, String date) {
+        runMatch(community, date, r -> {
+            String csv = LotMatcher.csv(community, r);
+            String name = Names.clean(community) + "_360s_" + date + ".csv";
+            try {
+                File dir = Store.dateDir(community, date);
+                dir.mkdirs();
+                try (FileWriter w = new FileWriter(new File(dir, name))) {
+                    w.write(csv);
+                }
+            } catch (Exception ignored) {
+            }
+            try {
+                File f = new File(ShareProvider.shareDir(this), name);
+                try (FileWriter w = new FileWriter(f)) {
+                    w.write(csv);
+                }
+                android.net.Uri uri = ShareProvider.uriFor(f);
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("text/csv");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, community + " 360s " + date);
+                send.setClipData(android.content.ClipData.newRawUri(name, uri));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                int matched = 0;
+                for (LotMatcher.Row row : r.rows) if (!row.panos.isEmpty()) matched++;
+                toast(matched + " of " + r.rows.size() + " lots matched");
+                try {
+                    startActivity(new Intent(send).setPackage(LOCALSEND_PKG));
+                } catch (android.content.ActivityNotFoundException ex) {
+                    startActivity(Intent.createChooser(send, "Send " + name));
+                }
+            } catch (Exception e) {
+                toast("Export failed: " + e.getMessage());
+            }
+        });
+    }
+
     private boolean selectDate(String community, String date) {
         boolean changed = !community.equals(store.active()) || !date.equals(store.activeDate());
         if (changed && store.openWindowId() != 0) {
