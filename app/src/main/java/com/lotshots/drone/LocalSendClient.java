@@ -136,13 +136,16 @@ public final class LocalSendClient {
         for (String proto : new String[]{"https", "http"}) {
             try {
                 Object[] r = post(proto + "://" + ip + ":" + PORT + "/api/localsend/v2/register",
-                        "application/json", info(proto).toString().getBytes("UTF-8"), 700, 2000);
-                if ((Integer) r[0] == 200) {
+                        "application/json", info(proto).toString().getBytes("UTF-8"), 800, 3500);
+                int code = (Integer) r[0];
+                if (code == 200) {
                     JSONObject j = new JSONObject((String) r[1]);
                     String fp = j.optString("fingerprint", "");
                     if (fp.equals(fingerprint)) return null; // that's us
                     return new Device(ip, j.optString("alias", ip), proto, fp);
                 }
+                // Something on LocalSend's port answered, just not the way we expected: still show it.
+                if (code > 0) return new Device(ip, "LocalSend at " + ip, proto, "");
             } catch (java.net.ConnectException e) {
                 return null; // nothing listening: don't bother with http
             } catch (Exception ignored) {
@@ -169,9 +172,67 @@ public final class LocalSendClient {
         return out;
     }
 
-    /** Checks every address on the Wi-Fi (x.x.x.1–254) for LocalSend. Takes a few seconds. */
+    /**
+     * LocalSend's own discovery: shout "I'm here" to the LocalSend multicast group and listen
+     * for other LocalSend devices answering or announcing themselves.
+     */
+    public List<Device> multicastDiscover(int listenMs) {
+        List<Device> found = new ArrayList<>();
+        java.net.MulticastSocket sock = null;
+        try {
+            InetAddress group = InetAddress.getByName("224.0.0.167");
+            sock = new java.net.MulticastSocket(null);
+            sock.setReuseAddress(true);
+            sock.bind(new java.net.InetSocketAddress(PORT));
+            sock.joinGroup(group);
+            sock.setSoTimeout(400);
+            JSONObject hello = info("https");
+            hello.put("announce", true);
+            hello.put("announcement", true);
+            byte[] msg = hello.toString().getBytes("UTF-8");
+            long end = System.currentTimeMillis() + listenMs;
+            long nextHello = 0;
+            byte[] buf = new byte[8192];
+            while (System.currentTimeMillis() < end) {
+                if (System.currentTimeMillis() >= nextHello) {
+                    sock.send(new java.net.DatagramPacket(msg, msg.length, group, PORT));
+                    nextHello = System.currentTimeMillis() + 1500;
+                }
+                java.net.DatagramPacket p = new java.net.DatagramPacket(buf, buf.length);
+                try {
+                    sock.receive(p);
+                } catch (java.net.SocketTimeoutException e) {
+                    continue;
+                }
+                try {
+                    JSONObject j = new JSONObject(new String(p.getData(), 0, p.getLength(), "UTF-8"));
+                    String fp = j.optString("fingerprint", "");
+                    if (fp.isEmpty() || fp.equals(fingerprint)) continue;
+                    String ip = p.getAddress().getHostAddress();
+                    boolean dup = false;
+                    for (Device d : found) if (d.fingerprint.equals(fp)) dup = true;
+                    if (!dup) found.add(new Device(ip, j.optString("alias", ip), j.optString("protocol", "https"), fp));
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (sock != null) sock.close();
+        }
+        return found;
+    }
+
+    /** Checks every address on the Wi-Fi (x.x.x.1–254) for LocalSend, plus LocalSend's multicast discovery. */
     public List<Device> scan() {
         List<Device> found = Collections.synchronizedList(new ArrayList<>());
+        Thread mc = new Thread(() -> {
+            for (Device d : multicastDiscover(6000)) {
+                // confirm over HTTP when possible (gives the right protocol)
+                Device checked = probe(d.ip);
+                found.add(checked != null ? checked : d);
+            }
+        });
+        mc.start();
         List<String> mine = localIps();
         ExecutorService pool = Executors.newFixedThreadPool(48);
         for (String me : mine) {
@@ -188,9 +249,19 @@ public final class LocalSendClient {
         pool.shutdown();
         try {
             pool.awaitTermination(25, TimeUnit.SECONDS);
+            mc.join(10000);
         } catch (InterruptedException ignored) {
         }
-        return new ArrayList<>(found);
+        // drop duplicates (same device found both ways)
+        List<Device> out = new ArrayList<>();
+        synchronized (found) {
+            for (Device d : found) {
+                boolean dup = false;
+                for (Device o : out) if (o.fingerprint.equals(d.fingerprint) || o.ip.equals(d.ip)) dup = true;
+                if (!dup) out.add(d);
+            }
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ sending

@@ -406,7 +406,8 @@ public class MainActivity extends Activity {
         String[] mac = store.mac();
         root.addView(text(mac == null ? "No Mac chosen yet." : "\uD83D\uDCBB  " + mac[2] + "   (" + mac[0] + ")", 15, mac == null ? 0xFFFFB74D : Color.WHITE, false));
         root.addView(text("Needs the free LocalSend app open on your Mac, on the same Wi-Fi.", 12, 0xFF888888, false));
-        addButtons(button("Find my Mac", 0xFF1565C0, v -> findMac(null)));
+        addButtons(button("Find my Mac", 0xFF1565C0, v -> findMac(null)),
+                button("Type address", 0xFF333333, v -> typeMacIp(null)));
 
         section("App");
         root.addView(text("Version " + myVersionName() + "  (build " + myBuild() + ")", 14, Color.WHITE, false));
@@ -1071,15 +1072,32 @@ public class MainActivity extends Activity {
                 .setMessage("Looking for your Mac\u2026\n\nMake sure LocalSend is open on the Mac.")
                 .setCancelable(false).show();
         new Thread(() -> {
+            android.net.wifi.WifiManager wifi = (android.net.wifi.WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+            android.net.wifi.WifiManager.MulticastLock lock = null;
+            try {
+                lock = wifi.createMulticastLock("lotshots-localsend");
+                lock.setReferenceCounted(false);
+                lock.acquire();
+            } catch (Exception ignored) {
+            }
             List<LocalSendClient.Device> found = lsClient().scan();
+            if (lock != null) try {
+                lock.release();
+            } catch (Exception ignored) {
+            }
             runOnUiThread(() -> {
                 wait.dismiss();
                 if (found.isEmpty()) {
                     new AlertDialog.Builder(this)
                             .setTitle("No Mac found")
-                            .setMessage("Check that:\n\u2022 LocalSend is open on your Mac\n\u2022 The Mac and controller are on the same Wi-Fi\n"
-                                    + "\u2022 Mac: System Settings \u2192 Privacy & Security \u2192 Local Network \u2192 LocalSend is on")
-                            .setPositiveButton("OK", null).show();
+                            .setMessage("This controller's address: " + TextUtils.join(", ", LocalSendClient.localIps()) + "\n\n"
+                                    + "Check that:\n\u2022 LocalSend is open on your Mac (Receive tab)\n\u2022 The Mac and controller are on the same Wi-Fi\n"
+                                    + "\u2022 Mac: System Settings \u2192 Privacy & Security \u2192 Local Network \u2192 LocalSend is on\n"
+                                    + "\u2022 Mac: System Settings \u2192 Network \u2192 Firewall isn't blocking LocalSend\n\n"
+                                    + "Or type the Mac's address (Mac: System Settings \u2192 Wi-Fi \u2192 Details \u2192 IP address).")
+                            .setPositiveButton("OK", null)
+                            .setNeutralButton("Type Mac's address", (d, w) -> typeMacIp(then))
+                            .show();
                     return;
                 }
                 String[] labels = new String[found.size()];
@@ -1095,6 +1113,44 @@ public class MainActivity extends Activity {
                         .setNegativeButton("Cancel", null).show();
             });
         }).start();
+    }
+
+    private void typeMacIp(Runnable then) {
+        EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setHint("e.g. 192.168.1.42");
+        e.setInputType(InputType.TYPE_CLASS_PHONE);
+        LinearLayout boxL = new LinearLayout(this);
+        boxL.setPadding(dp(20), dp(8), dp(20), 0);
+        boxL.addView(e, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this)
+                .setTitle("Mac's IP address")
+                .setView(boxL)
+                .setPositiveButton("Connect", (d, w) -> {
+                    String ip = e.getText().toString().trim();
+                    if (ip.isEmpty()) return;
+                    AlertDialog wait = new AlertDialog.Builder(this).setMessage("Checking " + ip + "\u2026").setCancelable(false).show();
+                    new Thread(() -> {
+                        LocalSendClient.Device dev = lsClient().probe(ip);
+                        runOnUiThread(() -> {
+                            wait.dismiss();
+                            if (dev == null) {
+                                new AlertDialog.Builder(this)
+                                        .setTitle("LocalSend not found at " + ip)
+                                        .setMessage("Make sure LocalSend is open on the Mac and the address is right. "
+                                                + "If it still fails, the Mac's firewall or the Wi-Fi may be blocking devices from talking to each other.")
+                                        .setPositiveButton("OK", null).show();
+                                return;
+                            }
+                            store.setMac(dev);
+                            toast("Will send to " + dev.alias);
+                            render();
+                            if (then != null) then.run();
+                        });
+                    }).start();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void sendToMac(String fileName, byte[] data) {
