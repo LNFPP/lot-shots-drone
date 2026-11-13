@@ -3,6 +3,9 @@ name: Build Lot Shots APK
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'mac/**'
+      - '.github/workflows/mac.yml'
   workflow_dispatch:
 
 permissions:
