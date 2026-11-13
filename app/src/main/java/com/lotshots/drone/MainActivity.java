@@ -595,7 +595,74 @@ public class MainActivity extends Activity {
             lp.setMargins(0, dp(5), 0, dp(5));
             root.addView(card, lp);
         }
-        if (!ss.isEmpty()) root.addView(text("Long-press a place to clear its times or remove it.", 12, 0xFF888888, false));
+        if (!ss.isEmpty()) {
+            root.addView(text("Long-press a place to clear its times or remove it.", 12, 0xFF888888, false));
+            TextView exp = button("\u21EA  Export data", 0xFF1565C0, v -> exportFlightDate(date));
+            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(-1, dp(52));
+            elp.setMargins(0, dp(18), 0, 0);
+            root.addView(exp, elp);
+            root.addView(text("Opens the share menu \u2014 pick LocalSend to send it to your Mac. A copy is also saved to " + flightLogDir().getAbsolutePath(), 12, 0xFF888888, false));
+        }
+    }
+
+    private File flightLogDir() {
+        return new File(Store.outputRoot(), "FlightLogs");
+    }
+
+    /** One CSV per date: Date, Type, Place, Start, Stop, Duration. Times include the time zone. */
+    private void exportFlightDate(String date) {
+        try {
+            SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US);
+            StringBuilder sb = new StringBuilder("Date,Type,Place,Start,Stop,Duration (min)\n");
+            int rows = 0;
+            for (JSONObject e : store.sessions(date)) {
+                long start = e.optLong("start"), stop = e.optLong("stop");
+                if (start == 0) continue;
+                sb.append(date).append(',')
+                        .append("community".equals(e.optString("type")) ? "Community" : "Location").append(',')
+                        .append(csv(e.optString("place"))).append(',')
+                        .append(iso.format(new Date(start))).append(',')
+                        .append(stop > 0 ? iso.format(new Date(stop)) : "").append(',')
+                        .append(stop > 0 ? String.valueOf(Math.round((stop - start) / 60000.0)) : "")
+                        .append('\n');
+                rows++;
+            }
+            if (rows == 0) {
+                toast("Nothing to export yet \u2014 start a time first");
+                return;
+            }
+            String name = "FlightLog_" + date + ".csv";
+
+            // backup copy next to the 360s (controller or microSD)
+            String backupNote;
+            try {
+                File dir = flightLogDir();
+                if (!dir.exists() && !dir.mkdirs()) throw new Exception("no folder");
+                try (FileWriter w = new FileWriter(new File(dir, name))) {
+                    w.write(sb.toString());
+                }
+                backupNote = "Saved a copy to " + dir.getAbsolutePath();
+            } catch (Exception ex) {
+                backupNote = "Couldn't save the backup copy (check photo access)";
+            }
+
+            // file for the share menu
+            File shared = new File(ShareProvider.shareDir(this), name);
+            try (FileWriter w = new FileWriter(shared)) {
+                w.write(sb.toString());
+            }
+            android.net.Uri uri = ShareProvider.uriFor(shared);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/csv");
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.putExtra(Intent.EXTRA_SUBJECT, "Flight Log " + date);
+            send.setClipData(android.content.ClipData.newRawUri(name, uri));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            toast(backupNote);
+            startActivity(Intent.createChooser(send, "Send Flight Log " + date));
+        } catch (Exception ex) {
+            toast("Export failed: " + ex.getMessage());
+        }
     }
 
     /** "Community or location?" then pick a community, or type a location name. */
