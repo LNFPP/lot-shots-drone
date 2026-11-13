@@ -254,13 +254,155 @@ public class Store {
         sp.edit().putString("watchFolders", a.toString()).apply();
     }
 
-    /** Only treat 2:1 images (stitched 360 spheres) as lot shots. */
+    /** Only stitched 360 spheres (2:1 images) are ever counted. */
     public boolean only360() {
-        return sp.getBoolean("only360", true);
+        return true;
     }
 
-    public void setOnly360(boolean b) {
-        sp.edit().putBoolean("only360", b).apply();
+    // ---------- flight log (time at each place; nothing to do with photos) ----------
+    // Stored as {"2026-11-12": [{"id":..,"type":"community"|"location","place":..,"start":ms,"stop":ms}, ...]}
+
+    private JSONObject flights() {
+        try {
+            return new JSONObject(sp.getString("flights", "{}"));
+        } catch (JSONException e) {
+            return new JSONObject();
+        }
+    }
+
+    private void saveFlights(JSONObject o) {
+        sp.edit().putString("flights", o.toString()).apply();
+    }
+
+    public static String today() {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(new java.util.Date());
+    }
+
+    /** Flight-log dates, newest first. */
+    public List<String> flightDates() {
+        synchronized (LOCK) {
+            List<String> out = new ArrayList<>();
+            Iterator<String> it = flights().keys();
+            while (it.hasNext()) out.add(it.next());
+            Collections.sort(out, Collections.reverseOrder());
+            return out;
+        }
+    }
+
+    /** Adds today's date if missing. Returns false if it was already there. */
+    public boolean addFlightDate(String date) {
+        synchronized (LOCK) {
+            JSONObject o = flights();
+            if (o.has(date)) return false;
+            try {
+                o.put(date, new JSONArray());
+            } catch (JSONException ignored) {
+            }
+            saveFlights(o);
+            return true;
+        }
+    }
+
+    public void deleteFlightDate(String date) {
+        synchronized (LOCK) {
+            JSONObject o = flights();
+            o.remove(date);
+            saveFlights(o);
+        }
+    }
+
+    public List<JSONObject> sessions(String date) {
+        synchronized (LOCK) {
+            List<JSONObject> out = new ArrayList<>();
+            JSONArray a = flights().optJSONArray(date);
+            if (a != null) for (int i = 0; i < a.length(); i++) {
+                JSONObject e = a.optJSONObject(i);
+                if (e != null) out.add(e);
+            }
+            return out;
+        }
+    }
+
+    public void addSession(String date, String type, String place) {
+        synchronized (LOCK) {
+            JSONObject o = flights();
+            JSONArray a = o.optJSONArray(date);
+            if (a == null) a = new JSONArray();
+            JSONObject e = new JSONObject();
+            try {
+                e.put("id", System.currentTimeMillis());
+                e.put("type", type);
+                e.put("place", place);
+                e.put("start", 0);
+                e.put("stop", 0);
+                a.put(e);
+                o.put(date, a);
+            } catch (JSONException ignored) {
+            }
+            saveFlights(o);
+        }
+    }
+
+    /** field = "start" or "stop"; value 0 clears it. Starting one timer stops any other running timer. */
+    public void setSessionTime(String date, long id, String field, long value) {
+        synchronized (LOCK) {
+            JSONObject o = flights();
+            long now = System.currentTimeMillis();
+            Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String d = it.next();
+                JSONArray a = o.optJSONArray(d);
+                if (a == null) continue;
+                for (int i = 0; i < a.length(); i++) {
+                    JSONObject e = a.optJSONObject(i);
+                    if (e == null) continue;
+                    try {
+                        if (d.equals(date) && e.optLong("id") == id) {
+                            e.put(field, value);
+                        } else if ("start".equals(field) && value > 0 && e.optLong("start") > 0 && e.optLong("stop") == 0) {
+                            e.put("stop", now);
+                        }
+                    } catch (JSONException ignored) {
+                    }
+                }
+            }
+            saveFlights(o);
+        }
+    }
+
+    public void deleteSession(String date, long id) {
+        synchronized (LOCK) {
+            JSONObject o = flights();
+            JSONArray a = o.optJSONArray(date), keep = new JSONArray();
+            if (a == null) return;
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject e = a.optJSONObject(i);
+                if (e != null && e.optLong("id") != id) keep.put(e);
+            }
+            try {
+                o.put(date, keep);
+            } catch (JSONException ignored) {
+            }
+            saveFlights(o);
+        }
+    }
+
+    /** The running timer, as {date, session} — or null if none is running. */
+    public Object[] runningSession() {
+        synchronized (LOCK) {
+            JSONObject o = flights();
+            Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String d = it.next();
+                JSONArray a = o.optJSONArray(d);
+                if (a == null) continue;
+                for (int i = 0; i < a.length(); i++) {
+                    JSONObject e = a.optJSONObject(i);
+                    if (e != null && e.optLong("start") > 0 && e.optLong("stop") == 0) return new Object[]{d, e};
+                }
+            }
+            return null;
+        }
     }
 
     // ---------- shot log ----------
