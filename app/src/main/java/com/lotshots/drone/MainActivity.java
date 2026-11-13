@@ -496,37 +496,49 @@ public class MainActivity extends Activity {
                 places.append(e.optString("place"));
             }
             LinearLayout t = new LinearLayout(this);
-            t.setOrientation(LinearLayout.VERTICAL);
-            t.setPadding(dp(16), dp(12), dp(16), dp(12));
+            t.setGravity(Gravity.CENTER_VERTICAL);
+            t.setPadding(dp(16), dp(12), dp(8), dp(12));
             t.setBackground(box(running ? 0xFF4A1414 : 0xFF2A2A2A, running ? 0xFFFF5252 : 0));
-            t.addView(text(prettyDate(d), 18, Color.WHITE, true));
-            t.addView(text(ss.isEmpty() ? "No places yet" : places.toString(), 13, 0xFFBBBBBB, false));
+            LinearLayout labels = new LinearLayout(this);
+            labels.setOrientation(LinearLayout.VERTICAL);
+            labels.addView(text(prettyDate(d), 18, Color.WHITE, true));
+            labels.addView(text(ss.isEmpty() ? "No places yet" : places.toString(), 13, 0xFFBBBBBB, false));
             if (running) {
                 TextView tv = text("", 13, 0xFFFFCDD2, true);
-                t.addView(tv);
-                tickViews.add(new Object[]{tv, ((JSONObject) run[1]).optLong("start"), "● Timer running  "});
+                labels.addView(tv);
+                tickViews.add(new Object[]{tv, ((JSONObject) run[1]).optLong("start"), "\u25CF Timer running  "});
             }
+            t.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+            t.addView(button("\uD83D\uDDD1", 0xFF5D1F1F, v -> confirmDeleteFlightDate(d)));
             t.setOnClickListener(v -> {
                 openFlightDate = d;
                 go(FLIGHT_DATE);
                 if (store.sessions(d).isEmpty()) addPlace(d);
             });
             t.setOnLongClickListener(v -> {
-                new AlertDialog.Builder(this)
-                        .setTitle("Delete " + prettyDate(d) + "?")
-                        .setMessage("Removes this date's places and times from the Flight Log.")
-                        .setPositiveButton("Delete", (dd, w) -> {
-                            store.deleteFlightDate(d);
-                            render();
-                        })
-                        .setNegativeButton("Cancel", null).show();
+                confirmDeleteFlightDate(d);
                 return true;
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.setMargins(0, dp(4), 0, dp(4));
             root.addView(t, lp);
         }
-        if (!dates.isEmpty()) root.addView(text("Long-press a date to delete it.", 12, 0xFF888888, false));
+    }
+
+    private void confirmDeleteFlightDate(String d) {
+        boolean running = false;
+        Object[] run = store.runningSession();
+        if (run != null && d.equals(run[0])) running = true;
+        new AlertDialog.Builder(this)
+                .setTitle("Delete " + prettyDate(d) + "?")
+                .setMessage("Removes this date's places and times from the Flight Log."
+                        + (running ? "\n\nA timer is still running on this date \u2014 it will be deleted too." : "")
+                        + "\n\nAlready-exported CSVs aren't affected.")
+                .setPositiveButton("Delete", (dd, w) -> {
+                    store.deleteFlightDate(d);
+                    render();
+                })
+                .setNegativeButton("Cancel", null).show();
     }
 
     private void renderFlightDate(String date) {
