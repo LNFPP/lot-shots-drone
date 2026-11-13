@@ -423,6 +423,17 @@ public class MainActivity extends Activity {
                         render();
                     }));
         }
+        addButtons(button("Show DJI preview folder", 0xFF1565C0, v -> {
+            AlertDialog wait = new AlertDialog.Builder(this).setMessage("Reading DJI Fly's previews\u2026").setCancelable(false).show();
+            new Thread(() -> {
+                String r = WhatChanged.previewFolder();
+                runOnUiThread(() -> {
+                    wait.dismiss();
+                    WhatChanged.lastReport = r;
+                    go(WHAT_CHANGED);
+                });
+            }).start();
+        }));
         if (WhatChanged.lastReport != null) addButtons(button("Show last results", 0xFF333333, v -> go(WHAT_CHANGED)));
 
         section("App");

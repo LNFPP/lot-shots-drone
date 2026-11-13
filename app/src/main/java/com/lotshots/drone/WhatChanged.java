@@ -179,6 +179,44 @@ public final class WhatChanged {
         return sb.toString();
     }
 
+    /** Lists everything in DJI Fly's preview folder, newest first, with each preview's size and shape. */
+    public static String previewFolder() {
+        File dir = new File(Environment.getExternalStorageDirectory(), "Android/data/dji.go.v5/cache/ImageCaches");
+        StringBuilder sb = new StringBuilder();
+        sb.append("DJI Fly preview folder\n").append(dir.getAbsolutePath()).append("\n");
+        sb.append("Checked: ").append(fmt(System.currentTimeMillis())).append("\n\n");
+        File[] files = dir.listFiles();
+        if (files == null) return sb.append("Can't read this folder (or it doesn't exist).\n").toString();
+        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        sb.append(files.length).append(" files\n");
+        Pattern parts = Pattern.compile("^(\\w+?)_(-?\\d+)_(DJI_\\d{14}_\\d{4}_[A-Z])_(\\w+?)_(\\d+)_(\\d+)_(\\d{14})_(.*)$");
+        int shown = 0;
+        for (File f : files) {
+            if (shown++ >= 200) {
+                sb.append("… and ").append(files.length - 200).append(" more\n");
+                break;
+            }
+            sb.append('\n').append(f.getName()).append('\n');
+            sb.append("  saved: ").append(fmt(f.lastModified())).append("   size: ").append(f.length()).append(" bytes\n");
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+            if (o.outWidth > 0) {
+                double r = (double) o.outWidth / o.outHeight;
+                sb.append(String.format(Locale.US, "  image: %d x %d  (shape %.3f : 1)%s\n", o.outWidth, o.outHeight, r,
+                        r > 1.9 && r < 2.1 ? "  <-- 2:1, looks like a 360" : ""));
+            }
+            Matcher m = parts.matcher(f.getName());
+            if (m.matches()) {
+                sb.append("  kind: ").append(m.group(1)).append("   drone file: ").append(m.group(3)).append('.').append(m.group(4).toUpperCase(Locale.US))
+                        .append("\n  original size: ").append(m.group(5)).append(" bytes (")
+                        .append(String.format(Locale.US, "%.1f MB", Long.parseLong(m.group(5)) / 1048576.0)).append(")")
+                        .append("   time in name: ").append(m.group(7)).append("   ending: ").append(m.group(8)).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
     /** What Android's own photo list (MediaStore) gained since `sinceSec`. */
     private static String mediaStore(Context c, long sinceSec) {
         StringBuilder sb = new StringBuilder();
