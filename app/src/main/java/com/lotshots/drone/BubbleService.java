@@ -59,7 +59,7 @@ public class BubbleService extends Service {
     public static volatile Runnable onChange;
 
     private static final long POLL_MS = 2500;
-    private static final int BLUE = 0xE61565C0;
+    private static final int BLUE = 0xE67E57C2; // purple (name kept)
     private static final int GREEN = 0xF243A047;
 
     private Store store;
@@ -385,7 +385,7 @@ public class BubbleService extends Service {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(10), dp(8), dp(10), dp(10));
-        box.setBackground(rounded(0xF2202124, 12));
+        box.setBackground(rounded(0xF21E1630, 12));
 
         TextView q = new TextView(this);
         q.setText(cancel ? "Cancel Lot " + lot + "?" : "Lot " + lot + "\nFinished stitch?");
@@ -415,7 +415,7 @@ public class BubbleService extends Service {
             }
             notifyChange();
         });
-        TextView no = chip(cancel ? "No" : "✕", 0xFF444444, v -> closePrompt());
+        TextView no = chip(cancel ? "No" : "✕", 0xFF3B2D55, v -> closePrompt());
         LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0, dp(48), 1);
         lp1.setMargins(0, 0, dp(6), 0);
         row.addView(yes, lp1);
@@ -473,7 +473,7 @@ public class BubbleService extends Service {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(10), dp(8), dp(10), dp(10));
-        root.setBackground(rounded(0xF2202124, 14));
+        root.setBackground(rounded(0xF21E1630, 14));
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -485,7 +485,7 @@ public class BubbleService extends Service {
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        header.addView(chip("✕", 0xFF444444, v -> closePanel()), new LinearLayout.LayoutParams(dp(44), -2));
+        header.addView(chip("✕", 0xFF3B2D55, v -> closePanel()), new LinearLayout.LayoutParams(dp(44), -2));
         root.addView(header);
 
         if (community.isEmpty() || date.isEmpty()) {
@@ -504,7 +504,7 @@ public class BubbleService extends Service {
             display.setTextSize(30);
             display.setTypeface(Typeface.DEFAULT_BOLD);
             display.setGravity(Gravity.CENTER);
-            display.setBackground(rounded(0xFF111111, 8));
+            display.setBackground(rounded(0xFF120C1C, 8));
             display.setPadding(dp(6), dp(8), dp(6), dp(8));
             final TextView status = new TextView(this);
             status.setTextSize(12);
@@ -538,7 +538,7 @@ public class BubbleService extends Service {
             for (String[] rowKeys : keys) {
                 LinearLayout r = new LinearLayout(this);
                 for (String k : rowKeys) {
-                    int color = Character.isDigit(k.charAt(0)) ? 0xFF3C3C3C : 0xFF555555;
+                    int color = Character.isDigit(k.charAt(0)) ? 0xFF33264A : 0xFF4A3A66;
                     TextView key = chip(k, color, v -> {
                         if (k.equals("C")) typed.setLength(0);
                         else if (k.equals("⌫")) {
@@ -562,7 +562,7 @@ public class BubbleService extends Service {
             side.setPadding(dp(6), dp(3), 0, 0);
             side.addView(display, new LinearLayout.LayoutParams(-1, -2));
             side.addView(status, new LinearLayout.LayoutParams(-1, -2));
-            TextView set = chip("✓  Set lot", 0xFF1565C0, v -> {
+            TextView set = chip("✓  Set lot", 0xFF7E57C2, v -> {
                 String t = typed.toString();
                 if (t.isEmpty()) {
                     toast("Type a lot number first");

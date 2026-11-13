@@ -42,8 +42,14 @@ import java.util.Set;
 
 public class MainActivity extends Activity {
 
+    // Purple palette
+    static final int C_BG = 0xFF140E1F, C_HEADER = 0xFF201634, C_CARD = 0xFF2A1F3D, C_CARD_ON = 0xFF4A2F7A,
+            C_ON_STROKE = 0xFFB388FF, C_PRIMARY = 0xFF7E57C2, C_SECONDARY = 0xFF3B2D55, C_ACCENT = 0xFF9C6ADE,
+            C_SECTION = 0xFFC9A7FF, C_MUTED = 0xFFB9ACD0, C_DANGER = 0xFF7A1F3D;
+
     private Store store;
     private LinearLayout root;
+    private LinearLayout head;   // fixed header (doesn't scroll)
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -51,12 +57,24 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         store = new Store(this);
+        LinearLayout frame = new LinearLayout(this);
+        frame.setOrientation(LinearLayout.VERTICAL);
+        frame.setBackgroundColor(C_BG);
+        head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.VERTICAL);
+        head.setPadding(dp(20), dp(12), dp(20), dp(12));
+        head.setBackgroundColor(C_HEADER);
+        head.setElevation(dp(4));
+        head.setVisibility(View.GONE);
+        frame.addView(head, new LinearLayout.LayoutParams(-1, -2));
         ScrollView sv = new ScrollView(this);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(16), dp(20), dp(32));
         sv.addView(root);
-        setContentView(sv);
+        frame.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1));
+        setContentView(frame);
+        getWindow().getDecorView().setBackgroundColor(C_BG);
     }
 
     @Override
@@ -131,7 +149,7 @@ public class MainActivity extends Activity {
     }
 
     private void section(String title) {
-        TextView t = text(title.toUpperCase(Locale.US), 13, 0xFF90CAF9, true);
+        TextView t = text(title.toUpperCase(Locale.US), 13, C_SECTION, true);
         t.setPadding(0, dp(22), 0, dp(6));
         root.addView(t);
     }
@@ -174,10 +192,12 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ navigation
 
     private static final String HOME = "home", SETTINGS = "settings", COMMUNITIES = "communities",
-            COMMUNITY = "community", FLIGHTS = "flights", FLIGHT_DATE = "flightDate", WHAT_CHANGED = "whatChanged";
+            COMMUNITY = "community", FLIGHTS = "flights", FLIGHT_DATE = "flightDate", WHAT_CHANGED = "whatChanged",
+            DATE360 = "date360";
     private String screen = HOME;
     private String openCommunity = null;
     private String openFlightDate = null;
+    private String openDate360 = null;
 
     private ValueAnimator pulse;
     private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -204,6 +224,9 @@ public class MainActivity extends Activity {
             case FLIGHT_DATE:
                 go(FLIGHTS);
                 break;
+            case DATE360:
+                go(COMMUNITY);
+                break;
             case WHAT_CHANGED:
                 go(SETTINGS);
                 break;
@@ -227,8 +250,13 @@ public class MainActivity extends Activity {
     private void render() {
         stopAnimations();
         root.removeAllViews();
+        head.removeAllViews();
+        head.setVisibility(View.GONE);
         if (COMMUNITY.equals(screen) && (openCommunity == null || !store.communityNames().contains(openCommunity))) screen = COMMUNITIES;
         if (FLIGHT_DATE.equals(screen) && (openFlightDate == null || !store.flightDates().contains(openFlightDate))) screen = FLIGHTS;
+        if (DATE360.equals(screen) && (openCommunity == null || openDate360 == null
+                || !store.communityNames().contains(openCommunity) || !store.dates(openCommunity).contains(openDate360))) screen = COMMUNITY;
+        if (COMMUNITY.equals(screen) && (openCommunity == null || !store.communityNames().contains(openCommunity))) screen = COMMUNITIES;
         switch (screen) {
             case SETTINGS:
                 renderSettings();
@@ -248,6 +276,9 @@ public class MainActivity extends Activity {
             case WHAT_CHANGED:
                 renderWhatChanged();
                 break;
+            case DATE360:
+                renderDate360(openCommunity, openDate360);
+                break;
             default:
                 screen = HOME;
                 renderHome();
@@ -255,8 +286,50 @@ public class MainActivity extends Activity {
         if (!tickViews.isEmpty()) ticker.post(tick);
     }
 
+    /** Fixed header: back link, big title (+ smaller line under it), a button on the right, and a row of buttons at the bottom. */
+    private void header(String backLabel, String backTo, String titleText, String sub, View right, View... bottom) {
+        head.setVisibility(View.VISIBLE);
+        if (backTo != null) {
+            TextView b = button("\u2190  " + backLabel, C_SECONDARY, v -> go(backTo));
+            b.setTextSize(13);
+            b.setPadding(dp(12), dp(6), dp(12), dp(6));
+            head.addView(b, new LinearLayout.LayoutParams(-2, -2));
+        }
+        LinearLayout r = new LinearLayout(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(0, dp(8), 0, 0);
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        TextView t = text(titleText, 24, Color.WHITE, true);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        titles.addView(t);
+        if (sub != null) titles.addView(text(sub, 14, C_MUTED, false));
+        r.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
+        if (right != null) {
+            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-2, -2);
+            rl.setMargins(dp(10), 0, 0, 0);
+            r.addView(right, rl);
+        }
+        head.addView(r);
+        if (bottom.length > 0) {
+            LinearLayout bl = new LinearLayout(this);
+            bl.setPadding(0, dp(10), 0, 0);
+            for (int i = 0; i < bottom.length; i++) {
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1);
+                if (i < bottom.length - 1) lp.setMargins(0, 0, dp(6), 0);
+                bl.addView(bottom[i], lp);
+            }
+            head.addView(bl);
+        }
+    }
+
+    private boolean setupDone() {
+        return hasOverlay() && hasFiles();
+    }
+
     private void backButton(String label, String to) {
-        root.addView(button("←  " + label, 0xFF333333, v -> go(to)), new LinearLayout.LayoutParams(-2, -2));
+        root.addView(button("←  " + label, C_SECONDARY, v -> go(to)), new LinearLayout.LayoutParams(-2, -2));
     }
 
     private void title(String t) {
@@ -315,69 +388,65 @@ public class MainActivity extends Activity {
 
     private void renderHome() {
         root.addView(text("Lot Shots — Drone", 26, Color.WHITE, true));
-        root.addView(text("Version " + myVersionName() + "  (build " + myBuild() + ")", 12, 0xFF888888, false));
-
-        if (!hasOverlay() || !hasFiles()) {
-            root.addView(text("⚠  Some permissions are missing — open Settings.", 14, 0xFFFFB74D, true));
-        }
+        root.addView(text("Version " + myVersionName() + "  (build " + myBuild() + ")", 12, C_MUTED, false));
         if (BubbleService.running) {
             root.addView(text("● 360 bubble on: " + store.active() + "  ·  " + prettyDate(store.activeDate()), 14, 0xFF81C784, true));
         }
 
-        tile("⚙  Settings", "Pano folder, save location, updates", 0xFF333333, v -> go(SETTINGS));
         int nc = store.communityNames().size();
-        tile("◎  360s", nc + (nc == 1 ? " community" : " communities") + " · lot bubble", 0xFF1565C0, v -> go(COMMUNITIES));
+        tile("◎  360s", nc + (nc == 1 ? " place" : " places") + " · lot bubble", C_PRIMARY, v -> go(COMMUNITIES));
 
         Object[] run = store.runningSession();
-        String sub = run == null ? "Time at each place" : null;
-        LinearLayout fl = tile("✈  Flight Log", sub, 0xFF2A2A2A, v -> go(FLIGHTS));
+        LinearLayout fl = tile("✈  Flight Log", run == null ? "Time at each place" : null, C_PRIMARY, v -> go(FLIGHTS));
         if (run != null) {
             JSONObject e = (JSONObject) run[1];
             TextView t = text("", 14, 0xFFFFCDD2, true);
             fl.addView(t);
             tickViews.add(new Object[]{t, e.optLong("start"), "● Timer running — " + e.optString("place") + "  "});
             // slow red pulse so you remember to stop the time
-            GradientDrawable bg = box(0xFF2A2A2A, 0);
+            GradientDrawable bg = box(C_PRIMARY, 0);
             fl.setBackground(bg);
-            pulse = ValueAnimator.ofObject(new ArgbEvaluator(), 0xFF2A2A2A, 0xFF8E1B1B);
+            pulse = ValueAnimator.ofObject(new ArgbEvaluator(), C_PRIMARY, 0xFF9E1B3A);
             pulse.setDuration(1600);
             pulse.setRepeatCount(ValueAnimator.INFINITE);
             pulse.setRepeatMode(ValueAnimator.REVERSE);
             pulse.addUpdateListener(an -> bg.setColor((Integer) an.getAnimatedValue()));
             pulse.start();
         }
+
+        LinearLayout st = tile("⚙  Settings", "Permissions, updates, tests", C_PRIMARY, v -> go(SETTINGS));
+        if (!setupDone()) st.addView(text("⚠  Do this first", 15, 0xFFFFD54F, true));
     }
 
     // ------------------------------------------------------------------ settings
 
     private void renderSettings() {
-        backButton("Home", HOME);
-        title("Settings");
+        header("Home", HOME, "Settings", setupDone() ? "All set" : "Finish the steps marked \u274C", null);
 
         section("Permissions");
         LinearLayout r1 = row();
         r1.addView(text((hasOverlay() ? "✅" : "❌") + "  Show bubble over DJI Fly", 15, Color.WHITE, false), new LinearLayout.LayoutParams(0, -2, 1));
-        if (!hasOverlay()) r1.addView(button("Allow", 0xFF1565C0, v -> askOverlay()));
+        if (!hasOverlay()) r1.addView(button("Allow", C_PRIMARY, v -> askOverlay()));
         root.addView(r1);
         LinearLayout r2 = row();
         r2.addView(text((hasFiles() ? "✅" : "❌") + "  Read & save photos", 15, Color.WHITE, false), new LinearLayout.LayoutParams(0, -2, 1));
-        if (!hasFiles()) r2.addView(button("Allow", 0xFF1565C0, v -> askFiles()));
+        if (!hasFiles()) r2.addView(button("Allow", C_PRIMARY, v -> askFiles()));
         root.addView(r2);
 
         section("Test: What changed?");
-        root.addView(text("Finds where DJI Fly keeps photo previews on the controller and what's in them.", 13, 0xFFBBBBBB, false));
+        root.addView(text("Finds where DJI Fly keeps photo previews on the controller and what's in them.", 13, C_MUTED, false));
         if (WhatChanged.before == null) {
             root.addView(text("1. Tap Start   2. In DJI Fly take one regular photo, then one 360 (wait for it to finish)   3. Come back and tap Stop", 12, 0xFF888888, false));
             addButtons(button("▶  Start test", 0xFF2E7D32, v -> startWhatChanged()));
         } else {
             root.addView(text("● Test running since " + clock(WhatChanged.startedAt) + " — take one regular photo and one 360 in DJI Fly, then tap Stop.", 13, 0xFFFFCDD2, true));
             addButtons(button("■  Stop & show results", 0xFFC62828, v -> stopWhatChanged()),
-                    button("Cancel", 0xFF333333, v -> {
+                    button("Cancel", C_SECONDARY, v -> {
                         WhatChanged.before = null;
                         render();
                     }));
         }
-        addButtons(button("Show DJI preview folder", 0xFF1565C0, v -> {
+        addButtons(button("Show DJI preview folder", C_PRIMARY, v -> {
             AlertDialog wait = new AlertDialog.Builder(this).setMessage("Reading DJI Fly's previews\u2026").setCancelable(false).show();
             new Thread(() -> {
                 String r = WhatChanged.previewFolder();
@@ -388,18 +457,18 @@ public class MainActivity extends Activity {
                 });
             }).start();
         }));
-        if (WhatChanged.lastReport != null) addButtons(button("Show last results", 0xFF333333, v -> go(WHAT_CHANGED)));
+        if (WhatChanged.lastReport != null) addButtons(button("Show last results", C_SECONDARY, v -> go(WHAT_CHANGED)));
 
         section("App");
         root.addView(text("Version " + myVersionName() + "  (build " + myBuild() + ")", 14, Color.WHITE, false));
-        addButtons(button("↻  Check for update", 0xFF1565C0, v -> checkForUpdate()));
+        addButtons(button("↻  Check for update", C_PRIMARY, v -> checkForUpdate()));
     }
 
     // ------------------------------------------------------------------ 360s: communities
 
     private void renderCommunities() {
-        backButton("Home", HOME);
-        title("360s");
+        TextView addC = button("+ Add", C_ACCENT, v -> editCommunity(null));
+        header("Home", HOME, "360s", "Communities & places", addC);
 
         if (BubbleService.running) {
             root.addView(text("● Bubble on: " + store.active() + "  ·  " + prettyDate(store.activeDate()), 15, 0xFF81C784, true));
@@ -414,7 +483,7 @@ public class MainActivity extends Activity {
 
         section("Communities");
         List<String> names = store.communityNames();
-        if (names.isEmpty()) root.addView(text("No communities yet. Add one and paste its lots.", 14, 0xFFBBBBBB, false));
+        if (names.isEmpty()) root.addView(text("No communities yet. Add one and paste its lots.", 14, C_MUTED, false));
         final int perRow = 2;
         LinearLayout row = null;
         for (int i = 0; i < names.size(); i++) {
@@ -427,10 +496,10 @@ public class MainActivity extends Activity {
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setPadding(dp(14), dp(14), dp(14), dp(14));
-            card.setBackground(box(on ? 0xFF0D3C78 : 0xFF2A2A2A, on ? 0xFF64B5F6 : 0));
+            card.setBackground(box(on ? C_CARD_ON : C_CARD, on ? C_ON_STROKE : 0));
             card.addView(text(name, 18, Color.WHITE, true));
             int nd = store.dates(name).size();
-            card.addView(text(store.lots(name).size() + " lots  ·  " + nd + (nd == 1 ? " date" : " dates"), 13, 0xFFBBBBBB, false));
+            card.addView(text(store.lots(name).size() + " lots  ·  " + nd + (nd == 1 ? " date" : " dates"), 13, C_MUTED, false));
             if (on) card.addView(text("● Shooting " + store.activeDate(), 12, 0xFF81C784, true));
             card.setOnClickListener(v -> {
                 openCommunity = name;
@@ -445,28 +514,22 @@ public class MainActivity extends Activity {
             row.addView(card, lp);
         }
         if (row != null && names.size() % perRow != 0) row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        addButtons(button("+ Add community", 0xFF2E7D32, v -> editCommunity(null)));
         if (!names.isEmpty()) root.addView(text("Long-press a community to edit its lots or delete it.", 12, 0xFF888888, false));
     }
 
     // ------------------------------------------------------------------ flight log
 
     private void renderFlightLog() {
-        backButton("Home", HOME);
-        title("Flight Log");
-
-        TextView add = button("+  Add date", 0xFF2E7D32, v -> {
+        TextView add = button("+ Add date", C_ACCENT, v -> {
             String d = Store.today();
             if (!store.addFlightDate(d)) toast("Today is already in the Flight Log");
             render();
         });
-        add.setTextSize(18);
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-1, dp(56));
-        alp.setMargins(0, dp(8), 0, dp(8));
-        root.addView(add, alp);
+        add.setTextSize(14);
+        header("Home", HOME, "Flight Log", null, add);
 
         List<String> dates = store.flightDates();
-        if (dates.isEmpty()) root.addView(text("No dates yet. Tap + Add date when you start your day.", 14, 0xFFBBBBBB, false));
+        if (dates.isEmpty()) root.addView(text("No dates yet. Tap + Add date when you start your day.", 14, C_MUTED, false));
         Object[] run = store.runningSession();
         for (String d : dates) {
             List<JSONObject> ss = store.sessions(d);
@@ -479,18 +542,18 @@ public class MainActivity extends Activity {
             LinearLayout t = new LinearLayout(this);
             t.setGravity(Gravity.CENTER_VERTICAL);
             t.setPadding(dp(16), dp(12), dp(8), dp(12));
-            t.setBackground(box(running ? 0xFF4A1414 : 0xFF2A2A2A, running ? 0xFFFF5252 : 0));
+            t.setBackground(box(running ? 0xFF4A1414 : C_CARD, running ? 0xFFFF5252 : 0));
             LinearLayout labels = new LinearLayout(this);
             labels.setOrientation(LinearLayout.VERTICAL);
             labels.addView(text(prettyDate(d), 18, Color.WHITE, true));
-            labels.addView(text(ss.isEmpty() ? "No places yet" : places.toString(), 13, 0xFFBBBBBB, false));
+            labels.addView(text(ss.isEmpty() ? "No places yet" : places.toString(), 13, C_MUTED, false));
             if (running) {
                 TextView tv = text("", 13, 0xFFFFCDD2, true);
                 labels.addView(tv);
                 tickViews.add(new Object[]{tv, ((JSONObject) run[1]).optLong("start"), "\u25CF Timer running  "});
             }
             t.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-            t.addView(button("\uD83D\uDDD1", 0xFF5D1F1F, v -> confirmDeleteFlightDate(d)));
+            t.addView(button("\uD83D\uDDD1", C_DANGER, v -> confirmDeleteFlightDate(d)));
             t.setOnClickListener(v -> {
                 openFlightDate = d;
                 go(FLIGHT_DATE);
@@ -523,16 +586,13 @@ public class MainActivity extends Activity {
     }
 
     private void renderFlightDate(String date) {
-        backButton("Flight Log", FLIGHTS);
-        title(prettyDate(date));
-
-        TextView add = button("+  Community or location", 0xFF2E7D32, v -> addPlace(date));
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-1, dp(52));
-        alp.setMargins(0, dp(8), 0, dp(8));
-        root.addView(add, alp);
+        TextView exp = button("\u21EA Export data", C_PRIMARY, v -> exportFlightDate(date, true));
+        exp.setTextSize(14);
+        header("Flight Log", FLIGHTS, prettyDate(date), null, exp,
+                button("+  Community or location", C_ACCENT, v -> addPlace(date)));
 
         List<JSONObject> ss = store.sessions(date);
-        if (ss.isEmpty()) root.addView(text("Add the community or location you're flying at.", 14, 0xFFBBBBBB, false));
+        if (ss.isEmpty()) root.addView(text("Add the community or location you're flying at.", 14, C_MUTED, false));
         for (int i = ss.size() - 1; i >= 0; i--) {
             JSONObject e = ss.get(i);
             long id = e.optLong("id"), start = e.optLong("start"), stop = e.optLong("stop");
@@ -541,7 +601,7 @@ public class MainActivity extends Activity {
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setPadding(dp(16), dp(12), dp(16), dp(12));
-            card.setBackground(box(0xFF2A2A2A, running ? 0xFFFF5252 : 0));
+            card.setBackground(box(C_CARD, running ? 0xFFFF5252 : 0));
             card.addView(text(e.optString("place"), 19, Color.WHITE, true));
             card.addView(text("community".equals(e.optString("type")) ? "Community" : "Location", 12, 0xFF888888, false));
 
@@ -565,7 +625,7 @@ public class MainActivity extends Activity {
                 });
                 tickViews.add(new Object[]{btn, start, "■  Stop time   "});
             } else {
-                btn = button("▶  Start again here", 0xFF333333, v -> {
+                btn = button("▶  Start again here", C_SECONDARY, v -> {
                     store.addSession(date, e.optString("type"), e.optString("place"));
                     List<JSONObject> now = store.sessions(date);
                     store.setSessionTime(date, now.get(now.size() - 1).optLong("id"), "start", System.currentTimeMillis());
@@ -597,12 +657,8 @@ public class MainActivity extends Activity {
         }
         if (!ss.isEmpty()) {
             root.addView(text("Long-press a place to clear its times or remove it.", 12, 0xFF888888, false));
-            TextView exp = button("\u21EA  Export data", 0xFF1565C0, v -> exportFlightDate(date, true));
-            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(-1, dp(52));
-            elp.setMargins(0, dp(18), 0, 0);
-            root.addView(exp, elp);
-            addButtons(button("Other apps\u2026", 0xFF333333, v -> exportFlightDate(date, false)));
-            root.addView(text("Opens LocalSend with the CSV ready \u2014 tap your Mac. A copy is also saved to " + flightLogDir().getAbsolutePath(), 12, 0xFF888888, false));
+            addButtons(button("Other apps\u2026", C_SECONDARY, v -> exportFlightDate(date, false)));
+            root.addView(text("Export data opens LocalSend with the CSV ready \u2014 tap your Mac. A copy is also saved to " + flightLogDir().getAbsolutePath(), 12, 0xFF888888, false));
         }
     }
 
@@ -678,370 +734,203 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** "Community or location?" then pick a community, or type a location name. */
+    /** Pick an existing place (shared with 360s) or type a new one. */
     private void addPlace(String date) {
-        new AlertDialog.Builder(this)
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(8), dp(16), 0);
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(list);
+        List<String> names = store.communityNames();
+        final AlertDialog[] dlg = new AlertDialog[1];
+        if (names.isEmpty()) list.addView(text("No places yet — type one below.", 14, C_MUTED, false));
+        for (String n : names) {
+            TextView t = button(n, C_SECONDARY, v -> {
+                store.addSession(date, store.lots(n).isEmpty() ? "location" : "community", n);
+                if (dlg[0] != null) dlg[0].dismiss();
+                render();
+            });
+            t.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.setMargins(0, dp(3), 0, dp(3));
+            list.addView(t, lp);
+        }
+        box.addView(sv, new LinearLayout.LayoutParams(-1, dp(Math.min(300, Math.max(60, names.size() * 52)))));
+
+        TextView or = text("New place", 13, C_SECTION, true);
+        or.setPadding(0, dp(12), 0, 0);
+        box.addView(or);
+        EditText name = new EditText(this);
+        name.setHint("Type a new community or location");
+        name.setSingleLine(true);
+        name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        box.addView(name, new LinearLayout.LayoutParams(-1, -2));
+
+        dlg[0] = new AlertDialog.Builder(this)
                 .setTitle("Where are you flying?")
-                .setItems(new String[]{"Community", "Location"}, (d, which) -> {
-                    if (which == 0) {
-                        List<String> names = store.communityNames();
-                        if (names.isEmpty()) {
-                            toast("No communities yet — add them under 360s, or choose Location");
-                            return;
-                        }
-                        new AlertDialog.Builder(this)
-                                .setTitle("Community")
-                                .setItems(names.toArray(new String[0]), (d2, w) -> {
-                                    store.addSession(date, "community", names.get(w));
-                                    render();
-                                })
-                                .setNegativeButton("Cancel", null).show();
-                    } else {
-                        EditText name = new EditText(this);
-                        name.setHint("Location name");
-                        name.setSingleLine(true);
-                        name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-                        LinearLayout boxL = new LinearLayout(this);
-                        boxL.setPadding(dp(20), dp(8), dp(20), 0);
-                        boxL.addView(name, new LinearLayout.LayoutParams(-1, -2));
-                        new AlertDialog.Builder(this)
-                                .setTitle("Location")
-                                .setView(boxL)
-                                .setPositiveButton("Add", (d2, w) -> {
-                                    String n = name.getText().toString().trim();
-                                    if (n.isEmpty()) {
-                                        toast("Type a location name");
-                                        return;
-                                    }
-                                    store.addSession(date, "location", n);
-                                    render();
-                                })
-                                .setNegativeButton("Cancel", null).show();
+                .setView(box)
+                .setPositiveButton("Add new", (d, w) -> {
+                    String n = name.getText().toString().trim();
+                    if (n.isEmpty()) {
+                        toast("Type a place name, or tap one in the list");
+                        return;
                     }
+                    String existing = null;
+                    for (String x : store.communityNames()) if (x.equalsIgnoreCase(n)) existing = x;
+                    String use = existing != null ? existing : n;
+                    if (existing == null) store.putCommunity(n, new ArrayList<>()); // shared with 360s
+                    store.addSession(date, store.lots(use).isEmpty() ? "location" : "community", use);
+                    render();
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
     private void renderCommunity(String name) {
-        backButton("360s", COMMUNITIES);
-
-        TextView title = text(name, 26, Color.WHITE, true);
-        title.setPadding(0, dp(12), 0, 0);
-        root.addView(title);
-        LinearLayout info = row();
-        info.addView(text(store.lots(name).size() + " lots", 14, 0xFFBBBBBB, false), new LinearLayout.LayoutParams(0, -2, 1));
-        info.addView(button("Edit lots", 0xFF333333, v -> editCommunity(name)));
-        root.addView(info);
-
-        TextView newDate = button("+  New date", 0xFF2E7D32, v -> {
+        TextView nd = button("+ New date", C_ACCENT, v -> {
             String d = store.createDate(name);
             if (d.isEmpty()) {
-                toast("Couldn't create the folder — allow photo access first");
+                toast("Couldn't create the date — allow photo access first (Settings)");
                 return;
             }
+            openDate360 = d;
             selectDate(name, d);
+            go(DATE360);
         });
-        newDate.setTextSize(18);
-        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, dp(56));
-        nlp.setMargins(0, dp(14), 0, dp(4));
-        root.addView(newDate, nlp);
+        nd.setTextSize(14);
+        int nl = store.lots(name).size();
+        header("360s", COMMUNITIES, name, nl + (nl == 1 ? " lot" : " lots"), nd);
 
-        section("Dates");
         List<String> dates = store.dates(name);
-        if (dates.isEmpty()) root.addView(text("No dates yet. Tap + New date before you fly.", 14, 0xFFBBBBBB, false));
+        if (dates.isEmpty()) root.addView(text("No dates yet. Tap + New date before you fly.", 14, C_MUTED, false));
         boolean thisActive = name.equals(store.active());
-        for (String d : dates) {
-            boolean on = thisActive && d.equals(store.activeDate());
-            LinearLayout tab = new LinearLayout(this);
-            tab.setGravity(Gravity.CENTER_VERTICAL);
-            tab.setPadding(dp(14), dp(10), dp(8), dp(10));
-            tab.setBackground(box(on ? 0xFF0D3C78 : 0xFF2A2A2A, on ? 0xFF64B5F6 : 0));
-            LinearLayout labels = new LinearLayout(this);
-            labels.setOrientation(LinearLayout.VERTICAL);
-            labels.addView(text(prettyDate(d), 17, Color.WHITE, true));
-            int n = store.loggedLots(name, d).size();
-            labels.addView(text(n + (n == 1 ? " lot logged" : " lots logged") + (on ? "   ● Shooting here" : ""), 13, on ? 0xFF81C784 : 0xFFBBBBBB, on));
-            tab.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-            if (!store.windows(name, d).isEmpty()) {
-                TextView mac = button("⇪ Mac", 0xFF1565C0, v -> exportLotCsv(name, d));
-                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-2, -2);
-                mlp.setMargins(0, 0, dp(8), 0);
-                tab.addView(mac, mlp);
+        final int perRow = 2;
+        LinearLayout row = null;
+        for (int i = 0; i < dates.size(); i++) {
+            if (i % perRow == 0) {
+                row = new LinearLayout(this);
+                root.addView(row);
             }
-            TextView del = button("\uD83D\uDDD1", 0xFF5D1F1F, v -> confirmDeleteDate(name, d));
-            tab.addView(del);
-            tab.setOnClickListener(v -> selectDate(name, d));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.setMargins(0, dp(4), 0, dp(4));
-            root.addView(tab, lp);
+            String d = dates.get(i);
+            boolean on = thisActive && d.equals(store.activeDate());
+            LinearLayout sq = new LinearLayout(this);
+            sq.setOrientation(LinearLayout.VERTICAL);
+            sq.setGravity(Gravity.CENTER_VERTICAL);
+            sq.setPadding(dp(14), dp(12), dp(14), dp(12));
+            sq.setBackground(box(on ? C_CARD_ON : C_CARD, on ? C_ON_STROKE : 0));
+            String[] pd = prettyDate(d).split(", ");
+            sq.addView(text(pd.length == 3 ? pd[0] + ", " + pd[1] : d, 18, Color.WHITE, true));
+            sq.addView(text(pd.length == 3 ? pd[2] : "", 13, C_MUTED, false));
+            int n = store.loggedLots(name, d).size();
+            TextView c = text(n + (n == 1 ? " lot logged" : " lots logged"), 14, Color.WHITE, false);
+            c.setPadding(0, dp(8), 0, 0);
+            sq.addView(c);
+            if (on) sq.addView(text("● Shooting here", 12, 0xFF81C784, true));
+            sq.setOnClickListener(v -> {
+                selectDate(name, d);
+                openDate360 = d;
+                go(DATE360);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(128), 1);
+            lp.setMargins(dp(4), dp(4), dp(4), dp(4));
+            row.addView(sq, lp);
+        }
+        if (row != null && dates.size() % perRow != 0) row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        addButtons(button("Edit lots", C_SECONDARY, v -> editCommunity(name)));
+    }
+
+    /** One 360s date: header with bubble, Match / Send / Delete; lots newest first. */
+    private void renderDate360(String community, String date) {
+        boolean active = community.equals(store.active()) && date.equals(store.activeDate());
+        TextView bubbleBtn = BubbleService.running && active
+                ? button("■ Stop bubble", 0xFFC62828, v -> {
+                    stopService(new Intent(this, BubbleService.class));
+                    root.postDelayed(this::render, 300);
+                })
+                : button("▶ Start bubble", 0xFF2E7D32, v -> {
+                    if (!active && !selectDate(community, date)) return;
+                    startBubble();
+                });
+        bubbleBtn.setTextSize(14);
+        header(community, COMMUNITY, prettyDate(date), community, bubbleBtn,
+                button("Match 360s", C_PRIMARY, v -> showMatch(community, date)),
+                button("⇪ Send to Mac", C_PRIMARY, v -> exportLotCsv(community, date)),
+                button("🗑 Delete", C_DANGER, v -> confirmDeleteDate(community, date)));
+
+        if (!active) {
+            root.addView(text("The bubble is set to " + (store.active().isEmpty() ? "nothing" : store.active() + " · " + prettyDate(store.activeDate())) + ".", 13, 0xFFFFD54F, false));
+            addButtons(button("Use this date for the bubble", C_SECONDARY, v -> {
+                if (selectDate(community, date)) render();
+            }));
+        } else if (BubbleService.running) {
+            root.addView(text("Bubble is on. Switch to DJI Fly — it stays on top.", 13, 0xFF81C784, false));
         }
 
-        // --- selected date: current lot, bubble, lots logged, match
-        if (thisActive && !store.activeDate().isEmpty() && dates.contains(store.activeDate())) {
-            String date = store.activeDate();
-            section("Shooting " + prettyDate(date));
-            long openId = store.openWindowId();
-            String cur = store.currentLot();
-            if (openId != 0) {
-                TextView t = text("● Lot " + cur + " set — waiting for \"Finished stitch\"", 16, 0xFFFF8A80, true);
-                root.addView(t);
-                addButtons(button("✓ Finished stitch", 0xFF2E7D32, v -> {
-                            store.finishWindow(openId, System.currentTimeMillis());
+        List<JSONObject> ws = store.windows(community, date);
+        if (ws.isEmpty()) root.addView(text("No lots yet. Set each lot with the bubble right before its 360.", 14, C_MUTED, false));
+        SimpleDateFormat fmt = new SimpleDateFormat("h:mm:ss a", Locale.US);
+        long openId = store.openWindowId();
+        for (int i = ws.size() - 1; i >= 0; i--) {
+            JSONObject e = ws.get(i);
+            long id = e.optLong("id"), fin = e.optLong("finish");
+            boolean waiting = fin == 0;
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(16), dp(12), dp(16), dp(12));
+            card.setBackground(box(C_CARD, waiting ? 0xFFFF5252 : 0));
+            card.addView(text("Lot " + e.optString("lot"), 20, Color.WHITE, true));
+            card.addView(text("Set " + fmt.format(new Date(e.optLong("set")))
+                    + (waiting ? "   →   waiting for Finished stitch" : "   →   Finished " + fmt.format(new Date(fin))), 13, waiting ? 0xFFFF8A80 : C_MUTED, false));
+            if (waiting && id == openId) {
+                String lot = e.optString("lot");
+                LinearLayout br = new LinearLayout(this);
+                br.setPadding(0, dp(10), 0, 0);
+                TextView yes = button("✓ Finished stitch", 0xFF2E7D32, v -> {
+                    store.finishWindow(id, System.currentTimeMillis());
+                    store.setOpenWindowId(0);
+                    store.setCurrentLot("");
+                    restartBubbleIfRunning();
+                    toast("✓ Lot " + lot + " logged");
+                    render();
+                });
+                TextView cancel = button("Cancel lot", C_DANGER, v -> new AlertDialog.Builder(this)
+                        .setMessage("Cancel Lot " + lot + "? Its set time is removed.")
+                        .setPositiveButton("Yes", (d2, w) -> {
+                            store.cancelWindow(id);
                             store.setOpenWindowId(0);
                             store.setCurrentLot("");
                             restartBubbleIfRunning();
-                            toast("✓ Lot " + cur + " logged");
                             render();
-                        }),
-                        button("Cancel lot", 0xFF5D1F1F, v -> new AlertDialog.Builder(this)
-                                .setMessage("Cancel Lot " + cur + "? Its set time is removed.")
-                                .setPositiveButton("Yes", (d2, w) -> {
-                                    store.cancelWindow(openId);
-                                    store.setOpenWindowId(0);
-                                    store.setCurrentLot("");
-                                    restartBubbleIfRunning();
-                                    render();
-                                })
-                                .setNegativeButton("No", null).show()));
-            } else {
-                root.addView(text("Set each lot with the bubble right before its 360.", 13, 0xFFBBBBBB, false));
+                        })
+                        .setNegativeButton("No", null).show());
+                LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, dp(46), 1);
+                l1.setMargins(0, 0, dp(6), 0);
+                br.addView(yes, l1);
+                br.addView(cancel, new LinearLayout.LayoutParams(0, dp(46), 1));
+                card.addView(br);
             }
-
-            TextView go = BubbleService.running
-                    ? button("■  Stop bubble", 0xFFC62828, v -> {
-                        stopService(new Intent(this, BubbleService.class));
-                        root.postDelayed(this::render, 300);
-                    })
-                    : button("▶  Start bubble", 0xFF2E7D32, v -> startBubble());
-            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-1, dp(56));
-            glp.setMargins(0, dp(8), 0, 0);
-            root.addView(go, glp);
-            if (BubbleService.running) root.addView(text("Bubble is on. Switch to DJI Fly — it stays on top.", 13, 0xFF81C784, false));
-
-            List<JSONObject> ws = store.windows(name, date);
-            section(ws.size() + (ws.size() == 1 ? " lot" : " lots") + " this date");
-            SimpleDateFormat fmt = new SimpleDateFormat("h:mm:ss a", Locale.US);
-            for (int i = ws.size() - 1; i >= 0; i--) {
-                JSONObject e = ws.get(i);
-                long fin = e.optLong("finish");
-                TextView t = text("Lot " + e.optString("lot") + "   set " + fmt.format(new Date(e.optLong("set")))
-                        + (fin > 0 ? "  →  finished " + fmt.format(new Date(fin)) : "  →  waiting…"), 13, fin > 0 ? Color.WHITE : 0xFFFF8A80, false);
-                t.setPadding(0, dp(5), 0, dp(5));
-                root.addView(t);
-            }
-            if (!ws.isEmpty()) {
-                addButtons(button("Match 360s", 0xFF1565C0, v -> showMatch(name, date)),
-                        button("⇪ Send CSV to Mac", 0xFF333333, v -> exportLotCsv(name, date)));
-                root.addView(text("Open DJI Fly's album first so the 360 previews load, then tap Match.", 12, 0xFF888888, false));
-            }
-        } else if (!dates.isEmpty()) {
-            root.addView(text("Tap a date to shoot into it.", 13, 0xFF888888, false));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.setMargins(0, dp(4), 0, dp(4));
+            root.addView(card, lp);
         }
+        if (!ws.isEmpty()) root.addView(text("Before Match 360s: open DJI Fly's album and scroll past today's 360s.", 12, C_MUTED, false));
     }
 
-    /** What the 360 watcher saw and why it did or didn't copy something. */
-    private void addWatchActivity(int max) {
-        List<String> log = store.watchLog();
-        section("Watcher activity");
-        if (log.isEmpty()) {
-            root.addView(text(BubbleService.running ? "Watching… nothing new yet." : "Start the bubble to begin watching.", 13, 0xFFBBBBBB, false));
-            return;
-        }
-        for (int i = 0; i < Math.min(max, log.size()); i++) {
-            String line = log.get(i);
-            int color = line.contains("✓") ? 0xFF81C784 : (line.contains("⚠") || line.contains("Skipped")) ? 0xFFFFB74D : 0xFFCCCCCC;
-            TextView t = text(line, 12, color, false);
-            t.setPadding(0, dp(2), 0, dp(2));
-            root.addView(t);
-        }
-        addButtons(button("Clear activity", 0xFF333333, v -> {
-            store.clearWatchLog();
-            render();
-        }));
-    }
-
-    private interface MatchDone {
-        void done(LotMatcher.Result r);
-    }
-
-    private void runMatch(String community, String date, MatchDone then) {
-        if (!hasFiles()) {
-            toast("Allow photo access first (Settings → Permissions)");
-            return;
-        }
-        AlertDialog wait = new AlertDialog.Builder(this).setMessage("Matching 360s to lots…").setCancelable(false).show();
-        new Thread(() -> {
-            LotMatcher.Result r = LotMatcher.match(store, community, date);
-            runOnUiThread(() -> {
-                wait.dismiss();
-                then.done(r);
-            });
-        }).start();
-    }
-
-    private String matchSummary(LotMatcher.Result r) {
-        SimpleDateFormat fmt = new SimpleDateFormat("h:mm:ss a", Locale.US);
-        StringBuilder sb = new StringBuilder();
-        if (!r.folderReadable) sb.append("⚠ Can't read DJI Fly's preview folder.\n\n");
-        int matched = 0;
-        for (LotMatcher.Row row : r.rows) if (!row.panos.isEmpty()) matched++;
-        sb.append(matched).append(" of ").append(r.rows.size()).append(" lots matched to a 360\n\n");
-        for (LotMatcher.Row row : r.rows) {
-            String lot = row.window.optString("lot");
-            if (row.panos.isEmpty()) {
-                sb.append("✗ Lot ").append(lot).append(" — no 360 found\n");
-            } else {
-                for (LotMatcher.Pano p : row.panos) {
-                    sb.append("✓ Lot ").append(lot).append(" → ").append(p.droneFile.replace(".JPG", ""))
-                            .append("  (started ").append(fmt.format(new Date(p.started))).append(")\n");
-                }
-                if (row.panos.size() > 1) sb.append("   ⚠ ").append(row.panos.size()).append(" 360s in this lot\n");
-            }
-        }
-        if (!r.unmatched.isEmpty()) {
-            sb.append("\n360s not in any lot window:\n");
-            for (LotMatcher.Pano p : r.unmatched) sb.append("  ").append(p.droneFile.replace(".JPG", "")).append("  (").append(fmt.format(new Date(p.started))).append(")\n");
-        }
-        if (r.pano360sThatDay == 0) sb.append("\nNo 360 previews found for this date. Open DJI Fly's album (scroll past today's 360s) and try again.");
-        return sb.toString();
-    }
-
-    private void showMatch(String community, String date) {
-        runMatch(community, date, r -> new AlertDialog.Builder(this)
-                .setTitle(community + " · " + prettyDate(date))
-                .setMessage(matchSummary(r))
-                .setPositiveButton("OK", null)
-                .setNeutralButton("Send CSV to Mac", (d, w) -> exportLotCsv(community, date))
-                .show());
-    }
-
-    /** Matches, saves the CSV next to the date, and opens LocalSend with it. */
-    private void exportLotCsv(String community, String date) {
-        runMatch(community, date, r -> {
-            String csv = LotMatcher.csv(community, r);
-            String name = Names.clean(community) + "_360s_" + date + ".csv";
-            try {
-                File dir = Store.dateDir(community, date);
-                dir.mkdirs();
-                try (FileWriter w = new FileWriter(new File(dir, name))) {
-                    w.write(csv);
-                }
-            } catch (Exception ignored) {
-            }
-            try {
-                File f = new File(ShareProvider.shareDir(this), name);
-                try (FileWriter w = new FileWriter(f)) {
-                    w.write(csv);
-                }
-                android.net.Uri uri = ShareProvider.uriFor(f);
-                Intent send = new Intent(Intent.ACTION_SEND);
-                send.setType("text/csv");
-                send.putExtra(Intent.EXTRA_STREAM, uri);
-                send.putExtra(Intent.EXTRA_SUBJECT, community + " 360s " + date);
-                send.setClipData(android.content.ClipData.newRawUri(name, uri));
-                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                int matched = 0;
-                for (LotMatcher.Row row : r.rows) if (!row.panos.isEmpty()) matched++;
-                toast(matched + " of " + r.rows.size() + " lots matched");
-                try {
-                    startActivity(new Intent(send).setPackage(LOCALSEND_PKG));
-                } catch (android.content.ActivityNotFoundException ex) {
-                    startActivity(Intent.createChooser(send, "Send " + name));
-                }
-            } catch (Exception e) {
-                toast("Export failed: " + e.getMessage());
-            }
-        });
-    }
-
-    /** Zips one date's 360s and hands the zip to LocalSend (tap your Mac). */
-    private void exportDateZip(String community, String date) {
-        File dir = Store.dateDir(community, date);
-        File[] files = dir.listFiles();
-        List<File> photos = new ArrayList<>();
-        if (files != null) for (File f : files) if (Names.isJpeg(f)) photos.add(f);
-        if (photos.isEmpty()) {
-            toast("No 360s in this date yet");
-            return;
-        }
-        long total = 0;
-        for (File f : photos) total += f.length();
-        File shareDir = ShareProvider.shareDir(this);
-        if (shareDir.getUsableSpace() < total + 50L * 1024 * 1024) {
-            toast("Not enough free space on the controller to build the zip");
-            return;
-        }
-        final long totalBytes = total;
-        String zipName = Names.clean(community) + "_360s_" + date + ".zip";
-        AlertDialog wait = new AlertDialog.Builder(this)
-                .setMessage("Zipping " + photos.size() + " 360s…")
-                .setCancelable(false).show();
-        new Thread(() -> {
-            String err = null;
-            File zip = new File(shareDir, zipName);
-            try {
-                // keep only the newest export, to save space on the controller
-                File[] old = shareDir.listFiles();
-                if (old != null) for (File o : old) if (o.getName().endsWith(".zip")) o.delete();
-                long done = 0;
-                byte[] buf = new byte[1 << 16];
-                try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(
-                        new java.io.BufferedOutputStream(new java.io.FileOutputStream(zip)))) {
-                    zos.setLevel(java.util.zip.Deflater.NO_COMPRESSION); // JPGs are already compressed
-                    String folder = Names.clean(community) + "_" + date + "/";
-                    for (File f : photos) {
-                        zos.putNextEntry(new java.util.zip.ZipEntry(folder + f.getName()));
-                        try (java.io.InputStream in = new java.io.FileInputStream(f)) {
-                            int n;
-                            while ((n = in.read(buf)) > 0) {
-                                zos.write(buf, 0, n);
-                                done += n;
-                            }
-                        }
-                        zos.closeEntry();
-                        final int pct = (int) (100 * done / Math.max(1, totalBytes));
-                        runOnUiThread(() -> wait.setMessage("Zipping " + photos.size() + " 360s…  " + pct + "%"));
-                    }
-                }
-            } catch (Exception ex) {
-                err = ex.getMessage();
-                zip.delete();
-            }
-            final String e = err;
-            runOnUiThread(() -> {
-                wait.dismiss();
-                if (e != null) {
-                    toast("Zip failed: " + e);
-                    return;
-                }
-                android.net.Uri uri = ShareProvider.uriFor(zip);
-                Intent send = new Intent(Intent.ACTION_SEND);
-                send.setType("application/zip");
-                send.putExtra(Intent.EXTRA_STREAM, uri);
-                send.putExtra(Intent.EXTRA_SUBJECT, community + " 360s " + date);
-                send.setClipData(android.content.ClipData.newRawUri(zipName, uri));
-                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                try {
-                    startActivity(new Intent(send).setPackage(LOCALSEND_PKG));
-                } catch (android.content.ActivityNotFoundException ex) {
-                    startActivity(Intent.createChooser(send, "Send " + zipName));
-                }
-            });
-        }).start();
-    }
-
-    private void selectDate(String community, String date) {
+    private boolean selectDate(String community, String date) {
         boolean changed = !community.equals(store.active()) || !date.equals(store.activeDate());
         if (changed && store.openWindowId() != 0) {
             toast("Finish or cancel Lot " + store.currentLot() + " first");
-            return;
+            return false;
         }
         store.setActive(community);
         store.setActiveDate(date);
         if (changed) store.setCurrentLot("");
         restartBubbleIfRunning();
         render();
+        return true;
     }
 
     private void confirmDeleteDate(String community, String date) {
@@ -1055,6 +944,7 @@ public class MainActivity extends Activity {
                         stopService(new Intent(this, BubbleService.class));
                     }
                     if (!store.deleteDate(community, date)) toast("Some files couldn't be deleted");
+                    if (DATE360.equals(screen)) screen = COMMUNITY;
                     root.postDelayed(this::render, 300);
                 })
                 .setNegativeButton("Cancel", null)
@@ -1127,8 +1017,8 @@ public class MainActivity extends Activity {
                 .setPositiveButton("Save", (d, w) -> {
                     String n = name.getText().toString().trim();
                     List<String> parsed = Names.parseLots(lots.getText().toString());
-                    if (n.isEmpty() || parsed.isEmpty()) {
-                        toast("Need a name and at least one lot");
+                    if (n.isEmpty()) {
+                        toast("Type a name");
                         return;
                     }
                     if (existing != null && !existing.equalsIgnoreCase(n)) store.deleteCommunity(existing);
@@ -1138,7 +1028,7 @@ public class MainActivity extends Activity {
                         store.setActive(n);
                         if (store.openWindowId() == 0 && !parsed.contains(store.currentLot())) store.setCurrentLot("");
                     }
-                    toast(n + ": " + parsed.size() + " lots");
+                    toast(n + ": " + parsed.size() + (parsed.size() == 1 ? " lot" : " lots"));
                     restartBubbleIfRunning();
                     render();
                 })
@@ -1335,7 +1225,7 @@ public class MainActivity extends Activity {
     private void renderWhatChanged() {
         backButton("Settings", SETTINGS);
         title("What changed?");
-        addButtons(button("⇪  Send report to Mac", 0xFF1565C0, v -> sendReport()));
+        addButtons(button("⇪  Send report to Mac", C_PRIMARY, v -> sendReport()));
         String r = WhatChanged.lastReport == null ? "No results yet." : WhatChanged.lastReport;
         TextView t = text(r, 12, 0xFFDDDDDD, false);
         t.setTypeface(android.graphics.Typeface.MONOSPACE);
