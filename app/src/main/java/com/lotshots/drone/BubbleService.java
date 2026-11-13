@@ -412,15 +412,29 @@ public class BubbleService extends Service {
             status.setPadding(0, dp(4), 0, dp(4));
 
             final TextView[] setBtn = new TextView[1];
+            final TextView[] retagBtn = new TextView[1];
+            final boolean[] retagMode = {false};
             final Runnable refresh = () -> {
-                if (setBtn[0] != null) {
-                    boolean stopMode = typed.length() == 0 && !current.isEmpty();
-                    setBtn[0].setText(stopMode ? "\u25A0  Stop Lot " + current : "\u2713  Set lot");
-                    setBtn[0].setBackground(rounded(stopMode ? 0xFFC62828 : 0xFF1565C0, 8));
-                }
                 String t = typed.toString();
+                if (setBtn[0] != null) {
+                    if (retagMode[0]) {
+                        setBtn[0].setText(t.isEmpty() ? "Type the right lot" : "\u21BA  Re-tag to Lot " + t);
+                        setBtn[0].setBackground(rounded(t.isEmpty() ? 0xFF444444 : 0xFF6A1B9A, 8));
+                    } else {
+                        boolean stopMode = t.isEmpty() && !current.isEmpty();
+                        setBtn[0].setText(stopMode ? "\u25A0  Stop Lot " + current : "\u2713  Set lot");
+                        setBtn[0].setBackground(rounded(stopMode ? 0xFFC62828 : 0xFF1565C0, 8));
+                    }
+                }
+                if (retagBtn[0] != null) {
+                    retagBtn[0].setText(retagMode[0] ? "\u2715  Cancel re-tag" : "\u21BA Re-tag last 360");
+                    retagBtn[0].setBackground(rounded(retagMode[0] ? 0xFFFF8F00 : 0xFF6A1B9A, 8));
+                }
                 display.setText("Lot " + (t.isEmpty() ? "__" : t));
-                if (t.isEmpty()) {
+                if (retagMode[0]) {
+                    status.setText("Re-tag: type the lot the last 360 should be");
+                    status.setTextColor(0xFFFFB74D);
+                } else if (t.isEmpty()) {
                     status.setText(current.isEmpty() ? "Type the lot number" : "Now: Lot " + current);
                     status.setTextColor(0xFFAAAAAA);
                 } else if (shot.contains(t)) {
@@ -474,6 +488,15 @@ public class BubbleService extends Service {
 
             TextView set = chip("\u2713  Set lot", 0xFF1565C0, v -> {
                 String t = typed.toString();
+                if (retagMode[0]) {
+                    if (t.isEmpty()) {
+                        toast("Type the lot the last 360 should be");
+                        return;
+                    }
+                    closePanel();
+                    retagLast(t);
+                    return;
+                }
                 if (t.isEmpty()) {
                     if (current.isEmpty()) {
                         toast("Type a lot number first");
@@ -498,13 +521,15 @@ public class BubbleService extends Service {
             sp.setMargins(0, dp(4), 0, dp(6));
             side.addView(set, sp);
 
+            // Toggle: first tap arms re-tag (amber) and waits for a lot number; second tap cancels.
             TextView retag = chip("\u21BA Re-tag last 360", 0xFF6A1B9A, v -> {
-                String t = typed.toString();
-                if (!t.isEmpty()) store.setCurrentLot(t);
-                closePanel();
-                retagLast();
+                retagMode[0] = !retagMode[0];
+                typed.setLength(0);
+                refresh.run();
             });
             retag.setTextSize(13);
+            retagBtn[0] = retag;
+            refresh.run();
             side.addView(retag, new LinearLayout.LayoutParams(-1, dp(44)));
             body.addView(side, new LinearLayout.LayoutParams(0, -2, 1f));
 
@@ -662,13 +687,9 @@ public class BubbleService extends Service {
     }
 
     /** Renames the most recent 360 to the currently selected lot (for when you forgot to tap first). */
-    private void retagLast() {
+    /** Renames the most recent 360 to `lot` (for when the wrong lot was set). The lot you're watching doesn't change. */
+    private void retagLast(String lot) {
         watch.post(() -> {
-            String lot = store.currentLot();
-            if (lot.isEmpty()) {
-                toast("Pick a lot first, then tap Re-tag");
-                return;
-            }
             JSONArray log = store.log();
             if (log.length() == 0) {
                 toast("No 360s logged yet");
@@ -698,8 +719,6 @@ public class BubbleService extends Service {
             store.setLog(log);
             MediaScannerConnection.scanFile(this, new String[]{old.getAbsolutePath(), nd.getAbsolutePath()}, null, null);
 
-            store.setCurrentLot("");
-            updateBubble();
             flashBubble();
             toast("↺ Lot " + oldLot + " → Lot " + lot);
             notifyChange();

@@ -35,7 +35,7 @@ For updates, open the same link again. The app installs over the old version and
 - The pad warns you if the lot already has a 360 or isn't in the community's list.
 - When the stitch finishes, the bubble turns green and pops, the copy is named, and the bubble goes back to **Lot __**.
   Set the lot again before each 360.
-- If you forgot to set the lot first, open the pad, type the correct number, then tap **↺ Re-tag last 360**.
+- Wrong lot on the last 360? Tap **↺ Re-tag last 360** (it turns amber), type the right lot, then tap **↺ Re-tag to Lot …**. Tap Re-tag again to cancel.
 
 ## Where files go
 
