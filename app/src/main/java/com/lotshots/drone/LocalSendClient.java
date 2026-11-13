@@ -184,7 +184,27 @@ public final class LocalSendClient {
             sock = new java.net.MulticastSocket(null);
             sock.setReuseAddress(true);
             sock.bind(new java.net.InetSocketAddress(PORT));
-            sock.joinGroup(group);
+            // Join on every real network (the RC Pro also has an internal 192.168.50.x link to the drone).
+            List<NetworkInterface> nets = new ArrayList<>();
+            Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+            while (ifs != null && ifs.hasMoreElements()) {
+                NetworkInterface ni = ifs.nextElement();
+                if (!ni.isUp() || ni.isLoopback() || !ni.supportsMulticast()) continue;
+                for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+                    if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
+                        nets.add(ni);
+                        break;
+                    }
+                }
+            }
+            java.net.InetSocketAddress groupAddr = new java.net.InetSocketAddress(group, PORT);
+            for (NetworkInterface ni : nets) {
+                try {
+                    sock.joinGroup(groupAddr, ni);
+                } catch (Exception ignored) {
+                }
+            }
+            if (nets.isEmpty()) sock.joinGroup(group);
             sock.setSoTimeout(400);
             JSONObject hello = info("https");
             hello.put("announce", true);
@@ -195,7 +215,15 @@ public final class LocalSendClient {
             byte[] buf = new byte[8192];
             while (System.currentTimeMillis() < end) {
                 if (System.currentTimeMillis() >= nextHello) {
-                    sock.send(new java.net.DatagramPacket(msg, msg.length, group, PORT));
+                    // say hello on each network, not just the default one
+                    for (NetworkInterface ni : nets) {
+                        try {
+                            sock.setNetworkInterface(ni);
+                            sock.send(new java.net.DatagramPacket(msg, msg.length, group, PORT));
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    if (nets.isEmpty()) sock.send(new java.net.DatagramPacket(msg, msg.length, group, PORT));
                     nextHello = System.currentTimeMillis() + 1500;
                 }
                 java.net.DatagramPacket p = new java.net.DatagramPacket(buf, buf.length);
