@@ -102,7 +102,6 @@ public class BubbleService extends Service {
         watchThread.start();
         watch = new Handler(watchThread.getLooper());
         running = true;
-        watch.post(this::poll);
         notifyChange();
     }
 
@@ -120,6 +119,7 @@ public class BubbleService extends Service {
     public void onDestroy() {
         running = false;
         closePanel();
+        closePrompt();
         if (strobe != null) strobe.cancel();
         if (fillAnim != null) fillAnim.cancel();
         if (bubbleFrame != null) {
@@ -228,7 +228,7 @@ public class BubbleService extends Service {
                         }
                         return true;
                     case MotionEvent.ACTION_UP:
-                        if (!moved) togglePanel();
+                        if (!moved) onBubbleTap();
                         return true;
                 }
                 return false;
@@ -332,7 +332,110 @@ public class BubbleService extends Service {
         });
     }
 
-    // ------------------------------------------------------------------ lot panel
+    // ------------------------------------------------------------------ taps
+    // Idle ("Lot __"):  tap = number pad.
+    // Lot set (red):    tap = "Finished stitch?"   triple-tap = "Cancel lot?"
+
+    private int tapCount = 0;
+    private final Runnable tapDecide = () -> {
+        int n = tapCount;
+        tapCount = 0;
+        if (store.openWindowId() != 0) {
+            if (n >= 3) showPrompt(true);
+            else showPrompt(false);
+        } else {
+            togglePanel();
+        }
+    };
+
+    private void onBubbleTap() {
+        if (store.openWindowId() == 0) {
+            // nothing to triple-tap for: open the pad right away
+            tapCount = 0;
+            main.removeCallbacks(tapDecide);
+            togglePanel();
+            return;
+        }
+        tapCount++;
+        main.removeCallbacks(tapDecide);
+        main.postDelayed(tapDecide, 400);
+    }
+
+    // ------------------------------------------------------------------ "Finished stitch?" / "Cancel lot?" box
+
+    private View prompt;
+
+    private void closePrompt() {
+        if (prompt != null) {
+            try {
+                wm.removeView(prompt);
+            } catch (Exception ignored) {
+            }
+            prompt = null;
+        }
+    }
+
+    private void showPrompt(boolean cancel) {
+        closePanel();
+        closePrompt();
+        long id = store.openWindowId();
+        String lot = store.currentLot();
+        if (id == 0) return;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(8), dp(10), dp(10));
+        box.setBackground(rounded(0xF2202124, 12));
+
+        TextView q = new TextView(this);
+        q.setText(cancel ? "Cancel Lot " + lot + "?" : "Lot " + lot + "\nFinished stitch?");
+        q.setTextColor(Color.WHITE);
+        q.setTextSize(15);
+        q.setTypeface(Typeface.DEFAULT_BOLD);
+        q.setGravity(Gravity.CENTER);
+        q.setPadding(0, 0, 0, dp(8));
+        box.addView(q);
+
+        LinearLayout row = new LinearLayout(this);
+        TextView yes = chip("Yes", cancel ? 0xFFC62828 : 0xFF2E7D32, v -> {
+            closePrompt();
+            if (cancel) {
+                store.cancelWindow(id);
+                store.setOpenWindowId(0);
+                store.setCurrentLot("");
+                updateBubble();
+                toast("Lot " + lot + " cancelled");
+            } else {
+                store.finishWindow(id, System.currentTimeMillis());
+                store.setOpenWindowId(0);
+                store.setCurrentLot("");
+                updateBubble();
+                flashBubble();
+                toast("✓ Lot " + lot + " logged");
+            }
+            notifyChange();
+        });
+        TextView no = chip(cancel ? "No" : "✕", 0xFF444444, v -> closePrompt());
+        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0, dp(48), 1);
+        lp1.setMargins(0, 0, dp(6), 0);
+        row.addView(yes, lp1);
+        row.addView(no, new LinearLayout.LayoutParams(0, dp(48), 1));
+        box.addView(row);
+
+        int w = dp(170);
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(w, WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
+        p.gravity = Gravity.TOP | Gravity.START;
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int screenH = getResources().getDisplayMetrics().heightPixels;
+        p.x = Math.max(0, Math.min(bubbleParams.x + dp(WINDOW_DP) / 2 - w / 2, screenW - w));
+        p.y = bubbleParams.y + dp(WINDOW_DP);
+        if (p.y > screenH - dp(130)) p.y = Math.max(0, bubbleParams.y - dp(130)); // no room below: show above
+        prompt = box;
+        wm.addView(prompt, p);
+    }
+
+    // ------------------------------------------------------------------ number pad (when no lot is set)
 
     private void togglePanel() {
         if (panel != null) closePanel();
@@ -363,41 +466,39 @@ public class BubbleService extends Service {
     }
 
     private void openPanel() {
+        closePrompt();
         String community = store.active();
-        String current = store.currentLot();
+        String date = store.activeDate();
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(10), dp(8), dp(10), dp(10));
         root.setBackground(rounded(0xF2202124, 14));
 
-        // header
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText(community.isEmpty() ? "No community" : community + "  \u00B7  " + store.activeDate());
+        title.setText(community.isEmpty() ? "No community" : community + "  ·  " + date);
         title.setTextColor(Color.WHITE);
         title.setTextSize(16);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView close = chip("✕", 0xFF444444, v -> closePanel());
-        header.addView(close, new LinearLayout.LayoutParams(dp(44), -2));
+        header.addView(chip("✕", 0xFF444444, v -> closePanel()), new LinearLayout.LayoutParams(dp(44), -2));
         root.addView(header);
 
-        if (community.isEmpty()) {
+        if (community.isEmpty() || date.isEmpty()) {
             TextView msg = new TextView(this);
-            msg.setText("Open Lot Shots and pick a community first.");
+            msg.setText("Open Lot Shots and pick a community and date first.");
             msg.setTextColor(0xFFCCCCCC);
             msg.setPadding(0, dp(12), 0, dp(12));
             root.addView(msg);
         } else {
             final StringBuilder typed = new StringBuilder();
-            final Set<String> shot = store.shotLots(community, store.activeDate());
+            final java.util.Set<String> logged = store.loggedLots(community, date);
             final List<String> lots = store.lots(community);
 
-            // big "Lot __" readout
             final TextView display = new TextView(this);
             display.setTextColor(Color.WHITE);
             display.setTextSize(30);
@@ -406,39 +507,18 @@ public class BubbleService extends Service {
             display.setBackground(rounded(0xFF111111, 8));
             display.setPadding(dp(6), dp(8), dp(6), dp(8));
             final TextView status = new TextView(this);
-            status.setTextColor(0xFFAAAAAA);
             status.setTextSize(12);
             status.setGravity(Gravity.CENTER);
             status.setPadding(0, dp(4), 0, dp(4));
 
-            final TextView[] setBtn = new TextView[1];
-            final TextView[] retagBtn = new TextView[1];
-            final boolean[] retagMode = {false};
             final Runnable refresh = () -> {
                 String t = typed.toString();
-                if (setBtn[0] != null) {
-                    if (retagMode[0]) {
-                        setBtn[0].setText(t.isEmpty() ? "Type the right lot" : "\u21BA  Re-tag to Lot " + t);
-                        setBtn[0].setBackground(rounded(t.isEmpty() ? 0xFF444444 : 0xFF6A1B9A, 8));
-                    } else {
-                        boolean stopMode = t.isEmpty() && !current.isEmpty();
-                        setBtn[0].setText(stopMode ? "\u25A0  Stop Lot " + current : "\u2713  Set lot");
-                        setBtn[0].setBackground(rounded(stopMode ? 0xFFC62828 : 0xFF1565C0, 8));
-                    }
-                }
-                if (retagBtn[0] != null) {
-                    retagBtn[0].setText(retagMode[0] ? "\u2715  Cancel re-tag" : "\u21BA Re-tag last 360");
-                    retagBtn[0].setBackground(rounded(retagMode[0] ? 0xFFFF8F00 : 0xFF6A1B9A, 8));
-                }
                 display.setText("Lot " + (t.isEmpty() ? "__" : t));
-                if (retagMode[0]) {
-                    status.setText("Re-tag: type the lot the last 360 should be");
-                    status.setTextColor(0xFFFFB74D);
-                } else if (t.isEmpty()) {
-                    status.setText(current.isEmpty() ? "Type the lot number" : "Now: Lot " + current);
+                if (t.isEmpty()) {
+                    status.setText("Type the lot number");
                     status.setTextColor(0xFFAAAAAA);
-                } else if (shot.contains(t)) {
-                    status.setText("\u2713 Already has a 360");
+                } else if (logged.contains(t)) {
+                    status.setText("✓ Already logged today");
                     status.setTextColor(0xFF81C784);
                 } else if (!lots.isEmpty() && !lots.contains(t)) {
                     status.setText("Not in " + community + "'s list");
@@ -450,20 +530,18 @@ public class BubbleService extends Service {
             refresh.run();
 
             LinearLayout body = new LinearLayout(this);
-            body.setOrientation(LinearLayout.HORIZONTAL);
             body.setPadding(0, dp(6), 0, 0);
 
-            // left: number pad
             LinearLayout pad = new LinearLayout(this);
             pad.setOrientation(LinearLayout.VERTICAL);
-            String[][] keys = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"\u232B", "0", "C"}};
+            String[][] keys = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"⌫", "0", "C"}};
             for (String[] rowKeys : keys) {
                 LinearLayout r = new LinearLayout(this);
                 for (String k : rowKeys) {
                     int color = Character.isDigit(k.charAt(0)) ? 0xFF3C3C3C : 0xFF555555;
                     TextView key = chip(k, color, v -> {
                         if (k.equals("C")) typed.setLength(0);
-                        else if (k.equals("\u232B")) {
+                        else if (k.equals("⌫")) {
                             if (typed.length() > 0) typed.setLength(typed.length() - 1);
                         } else if (typed.length() < 4 && !(typed.length() == 0 && k.equals("0"))) {
                             typed.append(k);
@@ -479,67 +557,36 @@ public class BubbleService extends Service {
             }
             body.addView(pad, new LinearLayout.LayoutParams(0, -2, 1.2f));
 
-            // right: readout + actions
             LinearLayout side = new LinearLayout(this);
             side.setOrientation(LinearLayout.VERTICAL);
             side.setPadding(dp(6), dp(3), 0, 0);
             side.addView(display, new LinearLayout.LayoutParams(-1, -2));
             side.addView(status, new LinearLayout.LayoutParams(-1, -2));
-
-            TextView set = chip("\u2713  Set lot", 0xFF1565C0, v -> {
+            TextView set = chip("✓  Set lot", 0xFF1565C0, v -> {
                 String t = typed.toString();
-                if (retagMode[0]) {
-                    if (t.isEmpty()) {
-                        toast("Type the lot the last 360 should be");
-                        return;
-                    }
-                    closePanel();
-                    retagLast(t);
-                    return;
-                }
                 if (t.isEmpty()) {
-                    if (current.isEmpty()) {
-                        toast("Type a lot number first");
-                        return;
-                    }
-                    // Pressed again with nothing typed: stop watching for this lot.
-                    store.setCurrentLot("");
-                    updateBubble();
-                    closePanel();
-                    notifyChange();
+                    toast("Type a lot number first");
                     return;
                 }
+                // Start this lot's window: the set time is recorded now.
+                long id = store.openWindow(community, date, t, System.currentTimeMillis());
+                store.setOpenWindowId(id);
                 store.setCurrentLot(t);
                 updateBubble();
                 closePanel();
                 notifyChange();
             });
             set.setTextSize(18);
-            setBtn[0] = set;
-            refresh.run();
-            LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(56));
-            sp.setMargins(0, dp(4), 0, dp(6));
+            LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(64));
+            sp.setMargins(0, dp(6), 0, 0);
             side.addView(set, sp);
-
-            // Toggle: first tap arms re-tag (amber) and waits for a lot number; second tap cancels.
-            TextView retag = chip("\u21BA Re-tag last 360", 0xFF6A1B9A, v -> {
-                retagMode[0] = !retagMode[0];
-                typed.setLength(0);
-                refresh.run();
-            });
-            retag.setTextSize(13);
-            retagBtn[0] = retag;
-            refresh.run();
-            side.addView(retag, new LinearLayout.LayoutParams(-1, dp(44)));
             body.addView(side, new LinearLayout.LayoutParams(0, -2, 1f));
-
             root.addView(body);
         }
 
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int screenH = getResources().getDisplayMetrics().heightPixels;
         int w = Math.min(dp(400), screenW - dp(16));
-
         WindowManager.LayoutParams p = new WindowManager.LayoutParams(w, WindowManager.LayoutParams.WRAP_CONTENT,
                 overlayType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
         p.gravity = Gravity.TOP | Gravity.START;
@@ -547,210 +594,7 @@ public class BubbleService extends Service {
         if (x + w > screenW) x = Math.max(0, bubbleParams.x - w - dp(8));
         p.x = x;
         p.y = Math.max(0, Math.min(bubbleParams.y, screenH - dp(300)));
-
         panel = root;
         wm.addView(panel, p);
-    }
-
-    // ------------------------------------------------------------------ folder watcher (watch thread)
-
-    private final java.util.Set<String> warned = new java.util.HashSet<>();
-
-    private void log(String msg) {
-        store.addWatchLog(msg);
-        notifyChange();
-    }
-
-    private List<File> candidates() {
-        List<File> out = new ArrayList<>();
-        String outRoot = Store.outputRoot().getAbsolutePath();
-        for (String path : store.watchFolders()) {
-            File d = new File(path);
-            if (!d.isDirectory()) {
-                if (warned.add("missing:" + path)) log("\u26A0 Folder not found: " + path);
-                continue;
-            }
-            if (d.listFiles() == null) {
-                if (warned.add("unreadable:" + path)) log("\u26A0 Can't read folder (no permission?): " + path);
-                continue;
-            }
-            collect(d, 0, outRoot, out);
-        }
-        return out;
-    }
-
-    private void collect(File dir, int depth, String skip, List<File> out) {
-        if (depth > 2 || dir.getAbsolutePath().startsWith(skip)) return;
-        File[] files = dir.listFiles();
-        if (files == null) return;
-        for (File f : files) {
-            if (f.isDirectory()) {
-                if (!f.getName().startsWith(".")) collect(f, depth + 1, skip, out);
-            } else if (Names.isJpeg(f)) {
-                out.add(f);
-            }
-        }
-    }
-
-    private void poll() {
-        if (!running) return;
-        try {
-            String sig = TextUtils.join("|", store.watchFolders());
-            if (!sig.equals(baselineSig)) {
-                // New or changed folder list: everything already there is "old" — only new files count.
-                known.clear();
-                pending.clear();
-                List<File> existing = candidates();
-                for (File f : existing) known.put(f.getAbsolutePath(), f.length());
-                baselineSig = sig;
-                if (store.watchFolders().isEmpty()) log("\u26A0 No pano folder set \u2014 Settings \u2192 Find my pano folder");
-                else log("Watching " + TextUtils.join(", ", store.watchFolders()) + " (" + existing.size() + " photos already there, ignored)");
-            } else {
-                for (File f : candidates()) {
-                    String p = f.getAbsolutePath();
-                    if (known.containsKey(p)) continue;
-                    if (Names.isOurs(f.getName())) {
-                        known.put(p, f.length());
-                        continue;
-                    }
-                    long size = f.length();
-                    Long prev = pending.get(p);
-                    boolean settled = prev != null && prev == size && size > 0
-                            && System.currentTimeMillis() - f.lastModified() > 2000;
-                    if (settled) {
-                        pending.remove(p);
-                        known.put(p, size);
-                        handleNew(f);
-                    } else {
-                        if (prev == null) log("New photo appeared: " + f.getName() + " \u2014 waiting for it to finish saving");
-                        pending.put(p, size);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // keep watching even if one pass fails
-        }
-        if (running) watch.postDelayed(this::poll, POLL_MS);
-    }
-
-    private void handleNew(File src) {
-        if (store.only360() && !Names.is360(src)) {
-            log("Skipped " + src.getName() + " \u2014 not a 360 (" + Names.dims(src) + ", needs 2:1)");
-            return;
-        }
-
-        String community = store.active();
-        if (community.isEmpty()) {
-            toast("New 360 found, but no community is selected in Lot Shots");
-            log("\u26A0 " + src.getName() + ": no community selected");
-            return;
-        }
-        String date = store.activeDate();
-        if (date.isEmpty()) {
-            toast("New 360 found, but no date folder is selected in Lot Shots");
-            log("\u26A0 " + src.getName() + ": no date selected");
-            return;
-        }
-        String lot = store.currentLot();
-        boolean assigned = !lot.isEmpty();
-        if (!assigned) lot = "UNASSIGNED";
-
-        long captured = src.lastModified();
-        File dest = save(src, community, date, lot, captured);
-        if (dest == null) {
-            toast("Lot Shots couldn't save " + src.getName() + " — check file access");
-            log("\u26A0 Couldn't copy " + src.getName() + " to " + Store.dateDir(community, date));
-            return;
-        }
-        log("\u2713 Copied " + src.getName() + " \u2192 " + dest.getName());
-        known.put(dest.getAbsolutePath(), dest.length());
-        MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath(), src.getAbsolutePath()}, null, null);
-
-        JSONObject e = new JSONObject();
-        try {
-            e.put("community", community);
-            e.put("date", date);
-            e.put("lot", lot);
-            e.put("time", captured);
-            e.put("src", src.getAbsolutePath());
-            e.put("dest", dest.getAbsolutePath());
-        } catch (JSONException ignored) {
-        }
-        store.addLog(e);
-
-        String msg;
-        if (assigned) {
-            // You choose every lot yourself: clear it so the next 360 can't land on the wrong lot.
-            store.setCurrentLot("");
-            msg = "✓ Lot " + lot + " saved";
-        } else {
-            msg = "360 saved as UNASSIGNED — pick a lot and tap Re-tag";
-        }
-        updateBubble();
-        flashBubble();
-        toast(msg);
-        notifyChange();
-    }
-
-    private File save(File src, String community, String date, String lot, long captured) {
-        String name = Names.fileName(community, lot, captured, Names.ext(src));
-        try {
-            // Always a copy: DJI Fly's original is never touched.
-            File dir = Store.dateDir(community, date);
-            if (!dir.exists() && !dir.mkdirs()) return null;
-            File dest = Names.unique(new File(dir, name));
-            copy(src, dest);
-            dest.setLastModified(captured);
-            return dest;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static void copy(File from, File to) throws Exception {
-        try (InputStream in = new FileInputStream(from); OutputStream out = new FileOutputStream(to)) {
-            byte[] buf = new byte[1 << 16];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-        }
-    }
-
-    /** Renames the most recent 360 to the currently selected lot (for when you forgot to tap first). */
-    /** Renames the most recent 360 to `lot` (for when the wrong lot was set). The lot you're watching doesn't change. */
-    private void retagLast(String lot) {
-        watch.post(() -> {
-            JSONArray log = store.log();
-            if (log.length() == 0) {
-                toast("No 360s logged yet");
-                return;
-            }
-            JSONObject e = log.optJSONObject(log.length() - 1);
-            if (e == null) return;
-            String community = e.optString("community");
-            File old = new File(e.optString("dest"));
-            if (!old.exists()) {
-                toast("Couldn't find the last 360 file to re-tag");
-                return;
-            }
-            String newName = Names.fileName(community, lot, e.optLong("time"), Names.ext(old));
-            File nd = Names.unique(new File(old.getParentFile(), newName));
-            if (!old.renameTo(nd)) {
-                toast("Re-tag failed — check file access");
-                return;
-            }
-            known.put(nd.getAbsolutePath(), nd.length());
-            String oldLot = e.optString("lot");
-            try {
-                e.put("lot", lot);
-                e.put("dest", nd.getAbsolutePath());
-            } catch (JSONException ignored) {
-            }
-            store.setLog(log);
-            MediaScannerConnection.scanFile(this, new String[]{old.getAbsolutePath(), nd.getAbsolutePath()}, null, null);
-
-            flashBubble();
-            toast("↺ Lot " + oldLot + " → Lot " + lot);
-            notifyChange();
-        });
     }
 }

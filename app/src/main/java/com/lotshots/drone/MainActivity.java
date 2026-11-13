@@ -364,52 +364,6 @@ public class MainActivity extends Activity {
         if (!hasFiles()) r2.addView(button("Allow", 0xFF1565C0, v -> askFiles()));
         root.addView(r2);
 
-        section("Where DJI Fly saves 360s");
-        List<String> folders = store.watchFolders();
-        if (folders.isEmpty()) {
-            root.addView(text("Not set. Take one sphere pano in DJI Fly first, then tap Find.", 14, 0xFFFFB74D, false));
-        } else {
-            for (String f : folders) root.addView(text("📁  " + f, 14, Color.WHITE, false));
-        }
-        addButtons(button("Find my pano folder", 0xFF1565C0, v -> scanForFolders()),
-                button("Type path", 0xFF333333, v -> typeFolder()),
-                button("Clear", 0xFF333333, v -> {
-                    store.setWatchFolders(new ArrayList<>());
-                    render();
-                }));
-
-        addWatchActivity(6);
-
-        section("Save 360s to");
-        boolean sd = Store.onSdCard();
-        addButtons(button((sd ? "○" : "◉") + "  Controller", sd ? 0xFF333333 : 0xFF1565C0, v -> {
-                    store.setSaveRoot(null);
-                    toast("Saving to controller storage");
-                    render();
-                }),
-                button((sd ? "◉" : "○") + "  microSD card", sd ? 0xFF1565C0 : 0xFF333333, v -> {
-                    String r = Store.findSdRoot(this);
-                    if (r == null) {
-                        toast("No microSD card found (or it can't be written to)");
-                        return;
-                    }
-                    store.setSaveRoot(r);
-                    render();
-                    if (r.contains("/Android/data/")) {
-                        new AlertDialog.Builder(this)
-                                .setTitle("Saving to microSD")
-                                .setMessage("The controller only lets Lot Shots save inside its own folder on the card:\n\n"
-                                        + r + "\n\nOn your Mac, open the card and go to Android → data → com.lotshots.drone → files → LotShots.\n\n"
-                                        + "Important: copy your 360s off before uninstalling Lot Shots — Android deletes this folder on uninstall. (Updating from the GitHub link is fine.)")
-                                .setPositiveButton("OK", null).show();
-                    } else {
-                        toast("Saving to microSD: " + r);
-                    }
-                }));
-        root.addView(text("Folder: " + Store.outputRoot().getAbsolutePath() + "/<Community>/<Date>/", 13, 0xFFBBBBBB, false));
-        root.addView(text("Only 360 spheres are copied. DJI Fly's originals are never changed.", 12, 0xFF888888, false));
-        if (store.log().length() > 0) addButtons(button("Export 360 log CSV", 0xFF333333, v -> exportCsv()));
-
         section("Test: What changed?");
         root.addView(text("Finds where DJI Fly keeps photo previews on the controller and what's in them.", 13, 0xFFBBBBBB, false));
         if (WhatChanged.before == null) {
@@ -806,11 +760,11 @@ public class MainActivity extends Activity {
             LinearLayout labels = new LinearLayout(this);
             labels.setOrientation(LinearLayout.VERTICAL);
             labels.addView(text(prettyDate(d), 17, Color.WHITE, true));
-            int n = store.count360s(name, d);
-            labels.addView(text(n + (n == 1 ? " 360" : " 360s") + (on ? "   ● Shooting here" : ""), 13, on ? 0xFF81C784 : 0xFFBBBBBB, on));
+            int n = store.loggedLots(name, d).size();
+            labels.addView(text(n + (n == 1 ? " lot logged" : " lots logged") + (on ? "   ● Shooting here" : ""), 13, on ? 0xFF81C784 : 0xFFBBBBBB, on));
             tab.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-            if (n > 0) {
-                TextView mac = button("\u21EA Mac", 0xFF1565C0, v -> exportDateZip(name, d));
+            if (!store.windows(name, d).isEmpty()) {
+                TextView mac = button("⇪ Mac", 0xFF1565C0, v -> exportLotCsv(name, d));
                 LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-2, -2);
                 mlp.setMargins(0, 0, dp(8), 0);
                 tab.addView(mac, mlp);
@@ -823,15 +777,36 @@ public class MainActivity extends Activity {
             root.addView(tab, lp);
         }
 
-        // --- selected date: next lot, start, shots
+        // --- selected date: current lot, bubble, lots logged, match
         if (thisActive && !store.activeDate().isEmpty() && dates.contains(store.activeDate())) {
             String date = store.activeDate();
             section("Shooting " + prettyDate(date));
-            LinearLayout r = row();
+            long openId = store.openWindowId();
             String cur = store.currentLot();
-            r.addView(text("Set: " + (cur.isEmpty() ? "Lot __" : "Lot " + cur), 20, Color.WHITE, true), new LinearLayout.LayoutParams(0, -2, 1));
-            r.addView(button("Change", 0xFF333333, v -> pickLot()));
-            root.addView(r);
+            if (openId != 0) {
+                TextView t = text("● Lot " + cur + " set — waiting for \"Finished stitch\"", 16, 0xFFFF8A80, true);
+                root.addView(t);
+                addButtons(button("✓ Finished stitch", 0xFF2E7D32, v -> {
+                            store.finishWindow(openId, System.currentTimeMillis());
+                            store.setOpenWindowId(0);
+                            store.setCurrentLot("");
+                            restartBubbleIfRunning();
+                            toast("✓ Lot " + cur + " logged");
+                            render();
+                        }),
+                        button("Cancel lot", 0xFF5D1F1F, v -> new AlertDialog.Builder(this)
+                                .setMessage("Cancel Lot " + cur + "? Its set time is removed.")
+                                .setPositiveButton("Yes", (d2, w) -> {
+                                    store.cancelWindow(openId);
+                                    store.setOpenWindowId(0);
+                                    store.setCurrentLot("");
+                                    restartBubbleIfRunning();
+                                    render();
+                                })
+                                .setNegativeButton("No", null).show()));
+            } else {
+                root.addView(text("Set each lot with the bubble right before its 360.", 13, 0xFFBBBBBB, false));
+            }
 
             TextView go = BubbleService.running
                     ? button("■  Stop bubble", 0xFFC62828, v -> {
@@ -844,17 +819,22 @@ public class MainActivity extends Activity {
             root.addView(go, glp);
             if (BubbleService.running) root.addView(text("Bubble is on. Switch to DJI Fly — it stays on top.", 13, 0xFF81C784, false));
 
-            List<JSONObject> shots = store.entries(name, date);
-            section(shots.size() + " lots shot this date");
-            SimpleDateFormat fmt = new SimpleDateFormat("h:mm a", Locale.US);
-            for (int i = shots.size() - 1; i >= 0; i--) {
-                JSONObject e = shots.get(i);
-                TextView t = text("Lot " + e.optString("lot") + "  ·  " + fmt.format(new Date(e.optLong("time")))
-                        + "\n" + new File(e.optString("dest")).getName(), 13, Color.WHITE, false);
+            List<JSONObject> ws = store.windows(name, date);
+            section(ws.size() + (ws.size() == 1 ? " lot" : " lots") + " this date");
+            SimpleDateFormat fmt = new SimpleDateFormat("h:mm:ss a", Locale.US);
+            for (int i = ws.size() - 1; i >= 0; i--) {
+                JSONObject e = ws.get(i);
+                long fin = e.optLong("finish");
+                TextView t = text("Lot " + e.optString("lot") + "   set " + fmt.format(new Date(e.optLong("set")))
+                        + (fin > 0 ? "  →  finished " + fmt.format(new Date(fin)) : "  →  waiting…"), 13, fin > 0 ? Color.WHITE : 0xFFFF8A80, false);
                 t.setPadding(0, dp(5), 0, dp(5));
                 root.addView(t);
             }
-            addWatchActivity(12);
+            if (!ws.isEmpty()) {
+                addButtons(button("Match 360s", 0xFF1565C0, v -> showMatch(name, date)),
+                        button("⇪ Send CSV to Mac", 0xFF333333, v -> exportLotCsv(name, date)));
+                root.addView(text("Open DJI Fly's album first so the 360 previews load, then tap Match.", 12, 0xFF888888, false));
+            }
         } else if (!dates.isEmpty()) {
             root.addView(text("Tap a date to shoot into it.", 13, 0xFF888888, false));
         }
@@ -879,6 +859,100 @@ public class MainActivity extends Activity {
             store.clearWatchLog();
             render();
         }));
+    }
+
+    private interface MatchDone {
+        void done(LotMatcher.Result r);
+    }
+
+    private void runMatch(String community, String date, MatchDone then) {
+        if (!hasFiles()) {
+            toast("Allow photo access first (Settings → Permissions)");
+            return;
+        }
+        AlertDialog wait = new AlertDialog.Builder(this).setMessage("Matching 360s to lots…").setCancelable(false).show();
+        new Thread(() -> {
+            LotMatcher.Result r = LotMatcher.match(store, community, date);
+            runOnUiThread(() -> {
+                wait.dismiss();
+                then.done(r);
+            });
+        }).start();
+    }
+
+    private String matchSummary(LotMatcher.Result r) {
+        SimpleDateFormat fmt = new SimpleDateFormat("h:mm:ss a", Locale.US);
+        StringBuilder sb = new StringBuilder();
+        if (!r.folderReadable) sb.append("⚠ Can't read DJI Fly's preview folder.\n\n");
+        int matched = 0;
+        for (LotMatcher.Row row : r.rows) if (!row.panos.isEmpty()) matched++;
+        sb.append(matched).append(" of ").append(r.rows.size()).append(" lots matched to a 360\n\n");
+        for (LotMatcher.Row row : r.rows) {
+            String lot = row.window.optString("lot");
+            if (row.panos.isEmpty()) {
+                sb.append("✗ Lot ").append(lot).append(" — no 360 found\n");
+            } else {
+                for (LotMatcher.Pano p : row.panos) {
+                    sb.append("✓ Lot ").append(lot).append(" → ").append(p.droneFile.replace(".JPG", ""))
+                            .append("  (started ").append(fmt.format(new Date(p.started))).append(")\n");
+                }
+                if (row.panos.size() > 1) sb.append("   ⚠ ").append(row.panos.size()).append(" 360s in this lot\n");
+            }
+        }
+        if (!r.unmatched.isEmpty()) {
+            sb.append("\n360s not in any lot window:\n");
+            for (LotMatcher.Pano p : r.unmatched) sb.append("  ").append(p.droneFile.replace(".JPG", "")).append("  (").append(fmt.format(new Date(p.started))).append(")\n");
+        }
+        if (r.pano360sThatDay == 0) sb.append("\nNo 360 previews found for this date. Open DJI Fly's album (scroll past today's 360s) and try again.");
+        return sb.toString();
+    }
+
+    private void showMatch(String community, String date) {
+        runMatch(community, date, r -> new AlertDialog.Builder(this)
+                .setTitle(community + " · " + prettyDate(date))
+                .setMessage(matchSummary(r))
+                .setPositiveButton("OK", null)
+                .setNeutralButton("Send CSV to Mac", (d, w) -> exportLotCsv(community, date))
+                .show());
+    }
+
+    /** Matches, saves the CSV next to the date, and opens LocalSend with it. */
+    private void exportLotCsv(String community, String date) {
+        runMatch(community, date, r -> {
+            String csv = LotMatcher.csv(community, r);
+            String name = Names.clean(community) + "_360s_" + date + ".csv";
+            try {
+                File dir = Store.dateDir(community, date);
+                dir.mkdirs();
+                try (FileWriter w = new FileWriter(new File(dir, name))) {
+                    w.write(csv);
+                }
+            } catch (Exception ignored) {
+            }
+            try {
+                File f = new File(ShareProvider.shareDir(this), name);
+                try (FileWriter w = new FileWriter(f)) {
+                    w.write(csv);
+                }
+                android.net.Uri uri = ShareProvider.uriFor(f);
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("text/csv");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, community + " 360s " + date);
+                send.setClipData(android.content.ClipData.newRawUri(name, uri));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                int matched = 0;
+                for (LotMatcher.Row row : r.rows) if (!row.panos.isEmpty()) matched++;
+                toast(matched + " of " + r.rows.size() + " lots matched");
+                try {
+                    startActivity(new Intent(send).setPackage(LOCALSEND_PKG));
+                } catch (android.content.ActivityNotFoundException ex) {
+                    startActivity(Intent.createChooser(send, "Send " + name));
+                }
+            } catch (Exception e) {
+                toast("Export failed: " + e.getMessage());
+            }
+        });
     }
 
     /** Zips one date's 360s and hands the zip to LocalSend (tap your Mac). */
@@ -959,6 +1033,10 @@ public class MainActivity extends Activity {
 
     private void selectDate(String community, String date) {
         boolean changed = !community.equals(store.active()) || !date.equals(store.activeDate());
+        if (changed && store.openWindowId() != 0) {
+            toast("Finish or cancel Lot " + store.currentLot() + " first");
+            return;
+        }
         store.setActive(community);
         store.setActiveDate(date);
         if (changed) store.setCurrentLot("");
@@ -967,11 +1045,11 @@ public class MainActivity extends Activity {
     }
 
     private void confirmDeleteDate(String community, String date) {
-        int n = store.count360s(community, date);
+        int n = store.windows(community, date).size();
         new AlertDialog.Builder(this)
                 .setTitle("Delete " + prettyDate(date) + "?")
-                .setMessage("Removes this folder and its " + n + (n == 1 ? " 360" : " 360s") + " from the controller.\n\n"
-                        + "DJI Fly's originals and the drone's SD card are not affected.")
+                .setMessage("Removes this date and its " + n + (n == 1 ? " lot" : " lots") + " (set and finished times) from Lot Shots.\n\n"
+                        + "Photos on the drone and CSVs already sent to your Mac are not affected.")
                 .setPositiveButton("Delete", (d, w) -> {
                     if (BubbleService.running && community.equals(store.active()) && date.equals(store.activeDate())) {
                         stopService(new Intent(this, BubbleService.class));
@@ -990,7 +1068,6 @@ public class MainActivity extends Activity {
         if (!hasOverlay()) missing.add("allow the bubble (Setup)");
         if (!hasFiles()) missing.add("allow photo access (Setup)");
         if (store.active().isEmpty() || store.activeDate().isEmpty()) missing.add("open a community and pick a date");
-        if (store.watchFolders().isEmpty()) missing.add("set the pano folder (home screen)");
         if (!missing.isEmpty()) {
             toast("First: " + TextUtils.join(", ", missing));
             return;
@@ -1059,7 +1136,7 @@ public class MainActivity extends Activity {
                     if (existing == null && replaced != null) toast("Updated existing community " + replaced);
                     if (store.active().equalsIgnoreCase(n)) {
                         store.setActive(n);
-                        if (!parsed.contains(store.currentLot())) store.setCurrentLot("");
+                        if (store.openWindowId() == 0 && !parsed.contains(store.currentLot())) store.setCurrentLot("");
                     }
                     toast(n + ": " + parsed.size() + " lots");
                     restartBubbleIfRunning();

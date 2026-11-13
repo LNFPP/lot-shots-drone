@@ -216,6 +216,7 @@ public class Store {
     /** Deletes a date folder and its 360s from the controller, and drops those log entries. */
     public boolean deleteDate(String community, String date) {
         boolean ok = deleteRecursive(dateDir(community, date));
+        deleteWindowsFor(community, date);
         synchronized (LOCK) {
             JSONArray a = log(), keep = new JSONArray();
             for (int i = 0; i < a.length(); i++) {
@@ -226,7 +227,11 @@ public class Store {
             }
             setLog(keep);
         }
-        if (community.equals(active()) && date.equals(activeDate())) setActiveDate("");
+        if (community.equals(active()) && date.equals(activeDate())) {
+            setActiveDate("");
+            setOpenWindowId(0);
+            setCurrentLot("");
+        }
         return ok;
     }
 
@@ -436,6 +441,110 @@ public class Store {
 
     public void clearWatchLog() {
         sp.edit().remove("watchLog").apply();
+    }
+
+    // ---------- lot windows: Set lot -> "Finished stitch? Yes" ----------
+    // [{"id", "community", "date", "lot", "set": ms, "finish": ms or 0}]
+
+    private JSONArray windowsAll() {
+        try {
+            return new JSONArray(sp.getString("lotWindows", "[]"));
+        } catch (JSONException e) {
+            return new JSONArray();
+        }
+    }
+
+    private void saveWindows(JSONArray a) {
+        sp.edit().putString("lotWindows", a.toString()).apply();
+    }
+
+    /** Records "lot set at this time" and returns its id. */
+    public long openWindow(String community, String date, String lot, long setMs) {
+        synchronized (LOCK) {
+            JSONArray a = windowsAll();
+            JSONObject e = new JSONObject();
+            long id = setMs;
+            try {
+                e.put("id", id);
+                e.put("community", community);
+                e.put("date", date);
+                e.put("lot", lot);
+                e.put("set", setMs);
+                e.put("finish", 0);
+            } catch (JSONException ignored) {
+            }
+            a.put(e);
+            saveWindows(a);
+            return id;
+        }
+    }
+
+    public void finishWindow(long id, long finishMs) {
+        synchronized (LOCK) {
+            JSONArray a = windowsAll();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject e = a.optJSONObject(i);
+                if (e != null && e.optLong("id") == id) try {
+                    e.put("finish", finishMs);
+                } catch (JSONException ignored) {
+                }
+            }
+            saveWindows(a);
+        }
+    }
+
+    /** Cancel: removes the lot and its set time completely. */
+    public void cancelWindow(long id) {
+        synchronized (LOCK) {
+            JSONArray a = windowsAll(), keep = new JSONArray();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject e = a.optJSONObject(i);
+                if (e != null && e.optLong("id") != id) keep.put(e);
+            }
+            saveWindows(keep);
+        }
+    }
+
+    public void deleteWindowsFor(String community, String date) {
+        synchronized (LOCK) {
+            JSONArray a = windowsAll(), keep = new JSONArray();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject e = a.optJSONObject(i);
+                if (e == null) continue;
+                if (community.equals(e.optString("community")) && date.equals(e.optString("date"))) continue;
+                keep.put(e);
+            }
+            saveWindows(keep);
+        }
+    }
+
+    /** The lot currently waiting for "Finished stitch?" (0 = none). */
+    public long openWindowId() {
+        return sp.getLong("openWindowId", 0);
+    }
+
+    public void setOpenWindowId(long id) {
+        sp.edit().putLong("openWindowId", id).apply();
+    }
+
+    /** Windows for one community + date (null community = every community that date), oldest first. */
+    public List<JSONObject> windows(String community, String date) {
+        List<JSONObject> out = new ArrayList<>();
+        JSONArray a = windowsAll();
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject e = a.optJSONObject(i);
+            if (e == null || !date.equals(e.optString("date"))) continue;
+            if (community != null && !community.equals(e.optString("community"))) continue;
+            out.add(e);
+        }
+        Collections.sort(out, (x, y) -> Long.compare(x.optLong("set"), y.optLong("set")));
+        return out;
+    }
+
+    public Set<String> loggedLots(String community, String date) {
+        Set<String> s = new HashSet<>();
+        for (JSONObject e : windows(community, date)) if (e.optLong("finish") > 0) s.add(e.optString("lot"));
+        return s;
     }
 
     // ---------- shot log ----------
