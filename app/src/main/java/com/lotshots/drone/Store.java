@@ -405,6 +405,34 @@ public class Store {
         }
     }
 
+    // ---------- send to Mac (LocalSend) ----------
+
+    /** This controller's LocalSend ID (random, made once). */
+    public String deviceFingerprint() {
+        String f = sp.getString("lsFingerprint", null);
+        if (f == null) {
+            f = java.util.UUID.randomUUID().toString().replace("-", "");
+            sp.edit().putString("lsFingerprint", f).apply();
+        }
+        return f;
+    }
+
+    /** Saved Mac: {ip, protocol, alias, fingerprint}, or null. */
+    public String[] mac() {
+        String ip = sp.getString("macIp", null);
+        if (ip == null) return null;
+        return new String[]{ip, sp.getString("macProto", "https"), sp.getString("macAlias", ip), sp.getString("macFp", "")};
+    }
+
+    public void setMac(LocalSendClient.Device d) {
+        if (d == null) {
+            sp.edit().remove("macIp").remove("macProto").remove("macAlias").remove("macFp").apply();
+        } else {
+            sp.edit().putString("macIp", d.ip).putString("macProto", d.protocol)
+                    .putString("macAlias", d.alias).putString("macFp", d.fingerprint).apply();
+        }
+    }
+
     // ---------- shot log ----------
 
     public JSONArray log() {

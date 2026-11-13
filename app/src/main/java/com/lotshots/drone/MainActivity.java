@@ -402,6 +402,12 @@ public class MainActivity extends Activity {
         root.addView(text("Only 360 spheres are copied. DJI Fly's originals are never changed.", 12, 0xFF888888, false));
         if (store.log().length() > 0) addButtons(button("Export 360 log CSV", 0xFF333333, v -> exportCsv()));
 
+        section("Send to Mac");
+        String[] mac = store.mac();
+        root.addView(text(mac == null ? "No Mac chosen yet." : "\uD83D\uDCBB  " + mac[2] + "   (" + mac[0] + ")", 15, mac == null ? 0xFFFFB74D : Color.WHITE, false));
+        root.addView(text("Needs the free LocalSend app open on your Mac, on the same Wi-Fi.", 12, 0xFF888888, false));
+        addButtons(button("Find my Mac", 0xFF1565C0, v -> findMac(null)));
+
         section("App");
         root.addView(text("Version " + myVersionName() + "  (build " + myBuild() + ")", 14, Color.WHITE, false));
         addButtons(button("↻  Check for update", 0xFF1565C0, v -> checkForUpdate()));
@@ -597,11 +603,13 @@ public class MainActivity extends Activity {
         }
         if (!ss.isEmpty()) {
             root.addView(text("Long-press a place to clear its times or remove it.", 12, 0xFF888888, false));
-            TextView exp = button("\u21EA  Export data", 0xFF1565C0, v -> exportFlightDate(date));
+            String[] mac = store.mac();
+            TextView exp = button("\u21EA  Export data to " + (mac == null ? "Mac" : mac[2]), 0xFF1565C0, v -> exportFlightDate(date, true));
             LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(-1, dp(52));
             elp.setMargins(0, dp(18), 0, 0);
             root.addView(exp, elp);
-            root.addView(text("Opens the share menu \u2014 pick LocalSend to send it to your Mac. A copy is also saved to " + flightLogDir().getAbsolutePath(), 12, 0xFF888888, false));
+            addButtons(button("Share\u2026", 0xFF333333, v -> exportFlightDate(date, false)));
+            root.addView(text("Sends the CSV to LocalSend on your Mac (same Wi-Fi). A copy is also saved to " + flightLogDir().getAbsolutePath(), 12, 0xFF888888, false));
         }
     }
 
@@ -610,7 +618,7 @@ public class MainActivity extends Activity {
     }
 
     /** One CSV per date: Date, Type, Place, Start, Stop, Duration. Times include the time zone. */
-    private void exportFlightDate(String date) {
+    private void exportFlightDate(String date, boolean toMac) {
         try {
             SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US);
             StringBuilder sb = new StringBuilder("Date,Type,Place,Start,Stop,Duration (min)\n");
@@ -644,6 +652,12 @@ public class MainActivity extends Activity {
                 backupNote = "Saved a copy to " + dir.getAbsolutePath();
             } catch (Exception ex) {
                 backupNote = "Couldn't save the backup copy (check photo access)";
+            }
+
+            if (toMac) {
+                toast(backupNote);
+                sendToMac(name, sb.toString().getBytes("UTF-8"));
+                return;
             }
 
             // file for the share menu
@@ -1039,6 +1053,88 @@ public class MainActivity extends Activity {
         } catch (Exception ex) {
             toast("Export failed: " + ex.getMessage());
         }
+    }
+
+    // ------------------------------------------------------------------ send to Mac
+
+    private LocalSendClient lsClient() {
+        return new LocalSendClient("Lot Shots (RC Pro)", store.deviceFingerprint());
+    }
+
+    /** Scans the Wi-Fi for LocalSend, lets you pick your Mac, then runs `then` (may be null). */
+    private void findMac(Runnable then) {
+        if (LocalSendClient.localIps().isEmpty()) {
+            toast("Connect the controller to Wi-Fi first");
+            return;
+        }
+        AlertDialog wait = new AlertDialog.Builder(this)
+                .setMessage("Looking for your Mac\u2026\n\nMake sure LocalSend is open on the Mac.")
+                .setCancelable(false).show();
+        new Thread(() -> {
+            List<LocalSendClient.Device> found = lsClient().scan();
+            runOnUiThread(() -> {
+                wait.dismiss();
+                if (found.isEmpty()) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("No Mac found")
+                            .setMessage("Check that:\n\u2022 LocalSend is open on your Mac\n\u2022 The Mac and controller are on the same Wi-Fi\n"
+                                    + "\u2022 Mac: System Settings \u2192 Privacy & Security \u2192 Local Network \u2192 LocalSend is on")
+                            .setPositiveButton("OK", null).show();
+                    return;
+                }
+                String[] labels = new String[found.size()];
+                for (int i = 0; i < found.size(); i++) labels[i] = found.get(i).alias + "   (" + found.get(i).ip + ")";
+                new AlertDialog.Builder(this)
+                        .setTitle("Choose your Mac")
+                        .setItems(labels, (d, w) -> {
+                            store.setMac(found.get(w));
+                            toast("Will send to " + found.get(w).alias);
+                            render();
+                            if (then != null) then.run();
+                        })
+                        .setNegativeButton("Cancel", null).show();
+            });
+        }).start();
+    }
+
+    private void sendToMac(String fileName, byte[] data) {
+        String[] mac = store.mac();
+        if (mac == null) {
+            findMac(() -> sendToMac(fileName, data));
+            return;
+        }
+        AlertDialog wait = new AlertDialog.Builder(this)
+                .setMessage("Sending to " + mac[2] + "\u2026\n\nIf the Mac asks, click Accept.")
+                .setCancelable(false).show();
+        new Thread(() -> {
+            LocalSendClient c = lsClient();
+            LocalSendClient.Device target = c.probe(mac[0]);
+            if (target == null || (!mac[3].isEmpty() && !mac[3].equals(target.fingerprint))) {
+                // The Mac's address may have changed: look for it by its ID.
+                target = null;
+                for (LocalSendClient.Device d : c.scan()) {
+                    if (d.fingerprint.equals(mac[3])) target = d;
+                }
+                if (target != null) store.setMac(target);
+            }
+            final String err = target == null
+                    ? "Couldn't find " + mac[2] + ". Is LocalSend open on the Mac, on the same Wi-Fi?"
+                    : c.send(target, fileName, "text/csv", data);
+            final String who = target == null ? mac[2] : target.alias;
+            runOnUiThread(() -> {
+                wait.dismiss();
+                if (err == null) {
+                    toast("\u2713 Sent " + fileName + " to " + who);
+                } else {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Not sent")
+                            .setMessage(err)
+                            .setPositiveButton("OK", null)
+                            .setNeutralButton("Choose Mac again", (d, w) -> findMac(() -> sendToMac(fileName, data)))
+                            .show();
+                }
+            });
+        }).start();
     }
 
     // ------------------------------------------------------------------ updates

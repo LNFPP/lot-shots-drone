@@ -16,6 +16,7 @@
         android:icon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.DeviceDefault"
         android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true"
         tools:targetApi="29">
 
         <activity
