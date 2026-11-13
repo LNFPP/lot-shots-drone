@@ -554,10 +554,28 @@ public class BubbleService extends Service {
 
     // ------------------------------------------------------------------ folder watcher (watch thread)
 
+    private final java.util.Set<String> warned = new java.util.HashSet<>();
+
+    private void log(String msg) {
+        store.addWatchLog(msg);
+        notifyChange();
+    }
+
     private List<File> candidates() {
         List<File> out = new ArrayList<>();
         String outRoot = Store.outputRoot().getAbsolutePath();
-        for (String path : store.watchFolders()) collect(new File(path), 0, outRoot, out);
+        for (String path : store.watchFolders()) {
+            File d = new File(path);
+            if (!d.isDirectory()) {
+                if (warned.add("missing:" + path)) log("\u26A0 Folder not found: " + path);
+                continue;
+            }
+            if (d.listFiles() == null) {
+                if (warned.add("unreadable:" + path)) log("\u26A0 Can't read folder (no permission?): " + path);
+                continue;
+            }
+            collect(d, 0, outRoot, out);
+        }
         return out;
     }
 
@@ -582,8 +600,11 @@ public class BubbleService extends Service {
                 // New or changed folder list: everything already there is "old" — only new files count.
                 known.clear();
                 pending.clear();
-                for (File f : candidates()) known.put(f.getAbsolutePath(), f.length());
+                List<File> existing = candidates();
+                for (File f : existing) known.put(f.getAbsolutePath(), f.length());
                 baselineSig = sig;
+                if (store.watchFolders().isEmpty()) log("\u26A0 No pano folder set \u2014 Settings \u2192 Find my pano folder");
+                else log("Watching " + TextUtils.join(", ", store.watchFolders()) + " (" + existing.size() + " photos already there, ignored)");
             } else {
                 for (File f : candidates()) {
                     String p = f.getAbsolutePath();
@@ -601,6 +622,7 @@ public class BubbleService extends Service {
                         known.put(p, size);
                         handleNew(f);
                     } else {
+                        if (prev == null) log("New photo appeared: " + f.getName() + " \u2014 waiting for it to finish saving");
                         pending.put(p, size);
                     }
                 }
@@ -612,16 +634,21 @@ public class BubbleService extends Service {
     }
 
     private void handleNew(File src) {
-        if (store.only360() && !Names.is360(src)) return;
+        if (store.only360() && !Names.is360(src)) {
+            log("Skipped " + src.getName() + " \u2014 not a 360 (" + Names.dims(src) + ", needs 2:1)");
+            return;
+        }
 
         String community = store.active();
         if (community.isEmpty()) {
             toast("New 360 found, but no community is selected in Lot Shots");
+            log("\u26A0 " + src.getName() + ": no community selected");
             return;
         }
         String date = store.activeDate();
         if (date.isEmpty()) {
             toast("New 360 found, but no date folder is selected in Lot Shots");
+            log("\u26A0 " + src.getName() + ": no date selected");
             return;
         }
         String lot = store.currentLot();
@@ -632,8 +659,10 @@ public class BubbleService extends Service {
         File dest = save(src, community, date, lot, captured);
         if (dest == null) {
             toast("Lot Shots couldn't save " + src.getName() + " — check file access");
+            log("\u26A0 Couldn't copy " + src.getName() + " to " + Store.dateDir(community, date));
             return;
         }
+        log("\u2713 Copied " + src.getName() + " \u2192 " + dest.getName());
         known.put(dest.getAbsolutePath(), dest.length());
         MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath(), src.getAbsolutePath()}, null, null);
 

@@ -76,6 +76,14 @@ public final class Names {
         return f.isFile() && (n.endsWith(".jpg") || n.endsWith(".jpeg"));
     }
 
+    /** "8192x4096", or "?" if it can't be read. */
+    public static String dims(File f) {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+        return o.outWidth > 0 ? o.outWidth + "x" + o.outHeight : "?";
+    }
+
     /** A stitched sphere panorama is 2:1 (e.g. 8192x4096). */
     public static boolean is360(File f) {
         BitmapFactory.Options o = new BitmapFactory.Options();

@@ -64,6 +64,9 @@ public class ShareProvider extends ContentProvider {
 
     @Override
     public String getType(Uri uri) {
+        String n = uri.getLastPathSegment() == null ? "" : uri.getLastPathSegment().toLowerCase(java.util.Locale.US);
+        if (n.endsWith(".zip")) return "application/zip";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
         return "text/csv";
     }
 

@@ -372,6 +372,8 @@ public class MainActivity extends Activity {
                     render();
                 }));
 
+        addWatchActivity(6);
+
         section("Save 360s to");
         boolean sd = Store.onSdCard();
         addButtons(button((sd ? "○" : "◉") + "  Controller", sd ? 0xFF333333 : 0xFF1565C0, v -> {
@@ -775,7 +777,13 @@ public class MainActivity extends Activity {
             int n = store.count360s(name, d);
             labels.addView(text(n + (n == 1 ? " 360" : " 360s") + (on ? "   ● Shooting here" : ""), 13, on ? 0xFF81C784 : 0xFFBBBBBB, on));
             tab.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView del = button("🗑", 0xFF5D1F1F, v -> confirmDeleteDate(name, d));
+            if (n > 0) {
+                TextView mac = button("\u21EA Mac", 0xFF1565C0, v -> exportDateZip(name, d));
+                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-2, -2);
+                mlp.setMargins(0, 0, dp(8), 0);
+                tab.addView(mac, mlp);
+            }
+            TextView del = button("\uD83D\uDDD1", 0xFF5D1F1F, v -> confirmDeleteDate(name, d));
             tab.addView(del);
             tab.setOnClickListener(v -> selectDate(name, d));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
@@ -814,9 +822,107 @@ public class MainActivity extends Activity {
                 t.setPadding(0, dp(5), 0, dp(5));
                 root.addView(t);
             }
+            addWatchActivity(12);
         } else if (!dates.isEmpty()) {
             root.addView(text("Tap a date to shoot into it.", 13, 0xFF888888, false));
         }
+    }
+
+    /** What the 360 watcher saw and why it did or didn't copy something. */
+    private void addWatchActivity(int max) {
+        List<String> log = store.watchLog();
+        section("Watcher activity");
+        if (log.isEmpty()) {
+            root.addView(text(BubbleService.running ? "Watching… nothing new yet." : "Start the bubble to begin watching.", 13, 0xFFBBBBBB, false));
+            return;
+        }
+        for (int i = 0; i < Math.min(max, log.size()); i++) {
+            String line = log.get(i);
+            int color = line.contains("✓") ? 0xFF81C784 : (line.contains("⚠") || line.contains("Skipped")) ? 0xFFFFB74D : 0xFFCCCCCC;
+            TextView t = text(line, 12, color, false);
+            t.setPadding(0, dp(2), 0, dp(2));
+            root.addView(t);
+        }
+        addButtons(button("Clear activity", 0xFF333333, v -> {
+            store.clearWatchLog();
+            render();
+        }));
+    }
+
+    /** Zips one date's 360s and hands the zip to LocalSend (tap your Mac). */
+    private void exportDateZip(String community, String date) {
+        File dir = Store.dateDir(community, date);
+        File[] files = dir.listFiles();
+        List<File> photos = new ArrayList<>();
+        if (files != null) for (File f : files) if (Names.isJpeg(f)) photos.add(f);
+        if (photos.isEmpty()) {
+            toast("No 360s in this date yet");
+            return;
+        }
+        long total = 0;
+        for (File f : photos) total += f.length();
+        File shareDir = ShareProvider.shareDir(this);
+        if (shareDir.getUsableSpace() < total + 50L * 1024 * 1024) {
+            toast("Not enough free space on the controller to build the zip");
+            return;
+        }
+        final long totalBytes = total;
+        String zipName = Names.clean(community) + "_360s_" + date + ".zip";
+        AlertDialog wait = new AlertDialog.Builder(this)
+                .setMessage("Zipping " + photos.size() + " 360s…")
+                .setCancelable(false).show();
+        new Thread(() -> {
+            String err = null;
+            File zip = new File(shareDir, zipName);
+            try {
+                // keep only the newest export, to save space on the controller
+                File[] old = shareDir.listFiles();
+                if (old != null) for (File o : old) if (o.getName().endsWith(".zip")) o.delete();
+                long done = 0;
+                byte[] buf = new byte[1 << 16];
+                try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(
+                        new java.io.BufferedOutputStream(new java.io.FileOutputStream(zip)))) {
+                    zos.setLevel(java.util.zip.Deflater.NO_COMPRESSION); // JPGs are already compressed
+                    String folder = Names.clean(community) + "_" + date + "/";
+                    for (File f : photos) {
+                        zos.putNextEntry(new java.util.zip.ZipEntry(folder + f.getName()));
+                        try (java.io.InputStream in = new java.io.FileInputStream(f)) {
+                            int n;
+                            while ((n = in.read(buf)) > 0) {
+                                zos.write(buf, 0, n);
+                                done += n;
+                            }
+                        }
+                        zos.closeEntry();
+                        final int pct = (int) (100 * done / Math.max(1, totalBytes));
+                        runOnUiThread(() -> wait.setMessage("Zipping " + photos.size() + " 360s…  " + pct + "%"));
+                    }
+                }
+            } catch (Exception ex) {
+                err = ex.getMessage();
+                zip.delete();
+            }
+            final String e = err;
+            runOnUiThread(() -> {
+                wait.dismiss();
+                if (e != null) {
+                    toast("Zip failed: " + e);
+                    return;
+                }
+                android.net.Uri uri = ShareProvider.uriFor(zip);
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("application/zip");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, community + " 360s " + date);
+                send.setClipData(android.content.ClipData.newRawUri(zipName, uri));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try {
+                    startActivity(new Intent(send).setPackage(LOCALSEND_PKG));
+                } catch (android.content.ActivityNotFoundException ex) {
+                    startActivity(Intent.createChooser(send, "Send " + zipName));
+                }
+            });
+        }).start();
     }
 
     private void selectDate(String community, String date) {

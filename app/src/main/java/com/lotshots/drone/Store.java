@@ -405,6 +405,39 @@ public class Store {
         }
     }
 
+    // ---------- watcher activity (what the 360 watcher saw and why) ----------
+
+    public void addWatchLog(String msg) {
+        synchronized (LOCK) {
+            JSONArray a;
+            try {
+                a = new JSONArray(sp.getString("watchLog", "[]"));
+            } catch (JSONException e) {
+                a = new JSONArray();
+            }
+            String t = new java.text.SimpleDateFormat("h:mm:ss a", java.util.Locale.US).format(new java.util.Date());
+            a.put(t + "  " + msg);
+            JSONArray keep = new JSONArray();
+            for (int i = Math.max(0, a.length() - 40); i < a.length(); i++) keep.put(a.optString(i));
+            sp.edit().putString("watchLog", keep.toString()).apply();
+        }
+    }
+
+    /** Newest first. */
+    public List<String> watchLog() {
+        List<String> out = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(sp.getString("watchLog", "[]"));
+            for (int i = a.length() - 1; i >= 0; i--) out.add(a.optString(i));
+        } catch (JSONException ignored) {
+        }
+        return out;
+    }
+
+    public void clearWatchLog() {
+        sp.edit().remove("watchLog").apply();
+    }
+
     // ---------- shot log ----------
 
     public JSONArray log() {
