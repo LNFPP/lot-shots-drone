@@ -547,6 +547,17 @@ public class Store {
         }
     }
 
+    /** When this community last had a lot set (0 = never). Used to sort 360s by most recent. */
+    public long lastShot(String community) {
+        long best = 0;
+        JSONArray a = windowsAll();
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject e = a.optJSONObject(i);
+            if (e != null && community.equals(e.optString("community"))) best = Math.max(best, e.optLong("set"));
+        }
+        return best;
+    }
+
     /** The lot currently waiting for "Finished stitch?" (0 = none). */
     public long openWindowId() {
         return sp.getLong("openWindowId", 0);

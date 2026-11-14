@@ -482,7 +482,24 @@ public class MainActivity extends Activity {
         }
 
         section("Communities");
-        List<String> names = store.communityNames();
+        List<String> names = new ArrayList<>(store.communityNames());
+        // Most recently shot first (by last lot set; otherwise newest date folder), then A\u2013Z.
+        final java.util.Map<String, Long> recent = new java.util.HashMap<>();
+        for (String n : names) {
+            long t = store.lastShot(n);
+            if (t == 0) {
+                List<String> ds = store.dates(n);
+                if (!ds.isEmpty()) try {
+                    t = new SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(ds.get(0)).getTime();
+                } catch (Exception ignored) {
+                }
+            }
+            recent.put(n, t);
+        }
+        names.sort((x, y) -> {
+            int c = Long.compare(recent.get(y), recent.get(x));
+            return c != 0 ? c : x.compareToIgnoreCase(y);
+        });
         if (names.isEmpty()) root.addView(text("No communities yet. Add one and paste its lots.", 14, C_MUTED, false));
         final int perRow = 2;
         LinearLayout row = null;
@@ -603,8 +620,23 @@ public class MainActivity extends Activity {
             card.setOrientation(LinearLayout.VERTICAL);
             card.setPadding(dp(16), dp(12), dp(16), dp(12));
             card.setBackground(box(C_CARD, running ? 0xFFFF5252 : 0));
-            card.addView(text(e.optString("place"), 19, Color.WHITE, true));
-            card.addView(text("community".equals(e.optString("type")) ? "Community" : "Location", 12, 0xFF888888, false));
+            LinearLayout top = new LinearLayout(this);
+            top.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout names2 = new LinearLayout(this);
+            names2.setOrientation(LinearLayout.VERTICAL);
+            names2.addView(text(e.optString("place"), 19, Color.WHITE, true));
+            names2.addView(text("community".equals(e.optString("type")) ? "Community" : "Location", 12, 0xFF888888, false));
+            top.addView(names2, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView del = button("\uD83D\uDDD1", C_DANGER, v -> new AlertDialog.Builder(this)
+                    .setMessage("Delete " + e.optString("place") + " from " + prettyDate(date) + "?" + (running ? "\n\nIts timer is still running." : ""))
+                    .setPositiveButton("Delete", (d2, w) -> {
+                        store.deleteSession(date, id);
+                        render();
+                    })
+                    .setNegativeButton("Cancel", null).show());
+            del.setPadding(0, 0, 0, 0);
+            top.addView(del, new LinearLayout.LayoutParams(dp(44), dp(44)));
+            card.addView(top);
 
             if (start > 0) {
                 String times = "Started " + clock(start) + (stop > 0 ? "   →   Stopped " + clock(stop) + "   (" + duration(stop - start) + ")" : "");
@@ -613,17 +645,6 @@ public class MainActivity extends Activity {
                 card.addView(tt);
             }
 
-            TextView del = button("\uD83D\uDDD1  Delete location", C_DANGER, v -> new AlertDialog.Builder(this)
-                    .setMessage("Delete " + e.optString("place") + " from " + prettyDate(date) + "?" + (running ? "\n\nIts timer is still running." : ""))
-                    .setPositiveButton("Delete", (d2, w) -> {
-                        store.deleteSession(date, id);
-                        render();
-                    })
-                    .setNegativeButton("Cancel", null).show());
-            del.setTextSize(13);
-            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, dp(40));
-            dlp.setMargins(0, dp(10), 0, 0);
-            card.addView(del, dlp);
 
             TextView btn;
             if (start == 0) {
