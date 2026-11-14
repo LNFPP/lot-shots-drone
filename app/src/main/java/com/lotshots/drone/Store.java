@@ -154,6 +154,35 @@ public class Store {
         }
     }
 
+    // ---------- locations (Flight Log places that aren't communities) ----------
+
+    public List<String> locationNames() {
+        List<String> out = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(sp.getString("locations", "[]"));
+            for (int i = 0; i < a.length(); i++) out.add(a.optString(i));
+        } catch (JSONException ignored) {
+        }
+        Collections.sort(out, String.CASE_INSENSITIVE_ORDER);
+        return out;
+    }
+
+    /** Adds a location unless it already exists (any capitalization). Returns the name to use. */
+    public String addLocation(String name) {
+        synchronized (LOCK) {
+            for (String n : locationNames()) if (n.equalsIgnoreCase(name)) return n;
+            JSONArray a;
+            try {
+                a = new JSONArray(sp.getString("locations", "[]"));
+            } catch (JSONException e) {
+                a = new JSONArray();
+            }
+            a.put(name);
+            sp.edit().putString("locations", a.toString()).apply();
+            return name;
+        }
+    }
+
     // ---------- active community / lot ----------
 
     public String active() {

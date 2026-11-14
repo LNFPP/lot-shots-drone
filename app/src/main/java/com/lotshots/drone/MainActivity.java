@@ -542,10 +542,11 @@ public class MainActivity extends Activity {
             LinearLayout t = new LinearLayout(this);
             t.setGravity(Gravity.CENTER_VERTICAL);
             t.setPadding(dp(16), dp(12), dp(8), dp(12));
-            t.setBackground(box(running ? 0xFF4A1414 : C_CARD, running ? 0xFFFF5252 : 0));
+            boolean today = d.equals(Store.today());
+            t.setBackground(box(running ? 0xFF4A1414 : C_CARD, today ? 0xFF4CAF50 : (running ? 0xFFFF5252 : 0)));
             LinearLayout labels = new LinearLayout(this);
             labels.setOrientation(LinearLayout.VERTICAL);
-            labels.addView(text(prettyDate(d), 18, Color.WHITE, true));
+            labels.addView(text(prettyDate(d) + (today ? "   \u25CF Today" : ""), 18, Color.WHITE, true));
             labels.addView(text(ss.isEmpty() ? "No places yet" : places.toString(), 13, C_MUTED, false));
             if (running) {
                 TextView tv = text("", 13, 0xFFFFCDD2, true);
@@ -612,9 +613,21 @@ public class MainActivity extends Activity {
                 card.addView(tt);
             }
 
+            TextView del = button("\uD83D\uDDD1  Delete location", C_DANGER, v -> new AlertDialog.Builder(this)
+                    .setMessage("Delete " + e.optString("place") + " from " + prettyDate(date) + "?" + (running ? "\n\nIts timer is still running." : ""))
+                    .setPositiveButton("Delete", (d2, w) -> {
+                        store.deleteSession(date, id);
+                        render();
+                    })
+                    .setNegativeButton("Cancel", null).show());
+            del.setTextSize(13);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, dp(40));
+            dlp.setMargins(0, dp(10), 0, 0);
+            card.addView(del, dlp);
+
             TextView btn;
             if (start == 0) {
-                btn = button("▶  Start time", 0xFF2E7D32, v -> {
+                btn = button("\u25B6  Start time", 0xFF2E7D32, v -> {
                     store.setSessionTime(date, id, "start", System.currentTimeMillis());
                     render();
                 });
@@ -734,59 +747,129 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Pick an existing place (shared with 360s) or type a new one. */
+    /** Two choices: Community or Location. */
     private void addPlace(String date) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(12), dp(16), dp(4));
+        final AlertDialog[] dlg = new AlertDialog[1];
+        TextView c = button("◎  Community", C_PRIMARY, v -> {
+            dlg[0].dismiss();
+            pickPlace(date, true);
+        });
+        TextView l = button("📍  Location", C_PRIMARY, v -> {
+            dlg[0].dismiss();
+            pickPlace(date, false);
+        });
+        c.setTextSize(18);
+        l.setTextSize(18);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(60));
+        lp.setMargins(0, dp(4), 0, dp(8));
+        box.addView(c, lp);
+        box.addView(l, new LinearLayout.LayoutParams(-1, dp(60)));
+        dlg[0] = new AlertDialog.Builder(this).setTitle("Where are you flying?").setView(box).setNegativeButton("Cancel", null).show();
+    }
+
+    /** "+ Add …" on top, then a scrolling list of existing communities (or locations). */
+    private void pickPlace(String date, boolean community) {
+        String kind = community ? "community" : "location";
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(16), dp(8), dp(16), 0);
+        final AlertDialog[] dlg = new AlertDialog[1];
+
+        TextView add = button("+  Add " + kind, C_ACCENT, v -> {
+            EditText name = new EditText(this);
+            name.setHint(community ? "Community name" : "Location name");
+            name.setSingleLine(true);
+            name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+            LinearLayout nb = new LinearLayout(this);
+            nb.setPadding(dp(20), dp(8), dp(20), 0);
+            nb.addView(name, new LinearLayout.LayoutParams(-1, -2));
+            new AlertDialog.Builder(this)
+                    .setTitle("New " + kind)
+                    .setView(nb)
+                    .setPositiveButton("Add", (d, w) -> {
+                        String n = name.getText().toString().trim();
+                        if (n.isEmpty()) {
+                            toast("Type a name");
+                            return;
+                        }
+                        // Already exists (as a community or a location)? Use that one.
+                        for (String x : store.communityNames()) if (x.equalsIgnoreCase(n)) {
+                            useSession(date, "community", x, dlg[0]);
+                            return;
+                        }
+                        for (String x : store.locationNames()) if (x.equalsIgnoreCase(n)) {
+                            useSession(date, "location", x, dlg[0]);
+                            return;
+                        }
+                        if (community) store.putCommunity(n, new ArrayList<>()); // also shows in 360s
+                        else store.addLocation(n);
+                        useSession(date, kind, n, dlg[0]);
+                    })
+                    .setNegativeButton("Cancel", null).show();
+        });
+        add.setTextSize(16);
+        box.addView(add, new LinearLayout.LayoutParams(-1, dp(52)));
 
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         ScrollView sv = new ScrollView(this);
         sv.addView(list);
-        List<String> names = store.communityNames();
-        final AlertDialog[] dlg = new AlertDialog[1];
-        if (names.isEmpty()) list.addView(text("No places yet — type one below.", 14, C_MUTED, false));
+        List<String> names = community ? store.communityNames() : store.locationNames();
+        if (names.isEmpty()) list.addView(text("None yet — tap + Add " + kind + ".", 14, C_MUTED, false));
         for (String n : names) {
-            TextView t = button(n, C_SECONDARY, v -> {
-                store.addSession(date, store.lots(n).isEmpty() ? "location" : "community", n);
-                if (dlg[0] != null) dlg[0].dismiss();
-                render();
-            });
+            TextView t = button(n, C_SECONDARY, v -> useSession(date, kind, n, dlg[0]));
             t.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.setMargins(0, dp(3), 0, dp(3));
             list.addView(t, lp);
         }
-        box.addView(sv, new LinearLayout.LayoutParams(-1, dp(Math.min(300, Math.max(60, names.size() * 52)))));
-
-        TextView or = text("New place", 13, C_SECTION, true);
-        or.setPadding(0, dp(12), 0, 0);
-        box.addView(or);
-        EditText name = new EditText(this);
-        name.setHint("Type a new community or location");
-        name.setSingleLine(true);
-        name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        box.addView(name, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, dp(Math.min(320, Math.max(60, names.size() * 52))));
+        slp.setMargins(0, dp(10), 0, 0);
+        box.addView(sv, slp);
 
         dlg[0] = new AlertDialog.Builder(this)
-                .setTitle("Where are you flying?")
+                .setTitle(community ? "Community" : "Location")
                 .setView(box)
-                .setPositiveButton("Add new", (d, w) -> {
-                    String n = name.getText().toString().trim();
-                    if (n.isEmpty()) {
-                        toast("Type a place name, or tap one in the list");
-                        return;
-                    }
-                    String existing = null;
-                    for (String x : store.communityNames()) if (x.equalsIgnoreCase(n)) existing = x;
-                    String use = existing != null ? existing : n;
-                    if (existing == null) store.putCommunity(n, new ArrayList<>()); // shared with 360s
-                    store.addSession(date, store.lots(use).isEmpty() ? "location" : "community", use);
-                    render();
-                })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("Back", (d, w) -> addPlace(date))
                 .show();
+    }
+
+    private void useSession(String date, String kind, String place, AlertDialog toClose) {
+        store.addSession(date, kind, place);
+        if (toClose != null) toClose.dismiss();
+        render();
+    }
+
+    /** Opens DJI Fly's album if DJI Fly offers a public album screen; otherwise opens DJI Fly. */
+    private void openDjiAlbum() {
+        String pkg = "dji.go.v5";
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(pkg, PackageManager.GET_ACTIVITIES);
+            if (pi.activities != null) {
+                for (android.content.pm.ActivityInfo a : pi.activities) {
+                    String n = a.name.toLowerCase(Locale.US);
+                    if (a.exported && (n.contains("album") || n.contains("playback") || n.contains("gallery"))) {
+                        try {
+                            startActivity(new Intent().setClassName(pkg, a.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                            toast("Scroll past today's 360s, then come back and tap Match 360s");
+                            return;
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        Intent launch = getPackageManager().getLaunchIntentForPackage(pkg);
+        if (launch != null) {
+            startActivity(launch);
+            toast("In DJI Fly, tap the album button and scroll past today's 360s");
+        } else {
+            toast("DJI Fly isn't installed");
+        }
     }
 
     private void renderCommunity(String name) {
@@ -860,6 +943,14 @@ public class MainActivity extends Activity {
                 button("⇪ Send to Mac", C_PRIMARY, v -> exportLotCsv(community, date)),
                 button("🗑 Delete", C_DANGER, v -> confirmDeleteDate(community, date)));
 
+        TextView albumTip = text("\uD83D\uDCF7  Open DJI Fly preview album and scroll the day  \u203A", 15, 0xFFFFD54F, true);
+        albumTip.setPadding(dp(12), dp(10), dp(12), dp(10));
+        albumTip.setBackground(box(0xFF3A3018, 0xFFFFD54F));
+        albumTip.setOnClickListener(v -> openDjiAlbum());
+        LinearLayout.LayoutParams atl = new LinearLayout.LayoutParams(-1, -2);
+        atl.setMargins(0, 0, 0, dp(10));
+        root.addView(albumTip, atl);
+
         if (!active) {
             root.addView(text("The bubble is set to " + (store.active().isEmpty() ? "nothing" : store.active() + " · " + prettyDate(store.activeDate())) + ".", 13, 0xFFFFD54F, false));
             addButtons(button("Use this date for the bubble", C_SECONDARY, v -> {
@@ -916,7 +1007,6 @@ public class MainActivity extends Activity {
             lp.setMargins(0, dp(4), 0, dp(4));
             root.addView(card, lp);
         }
-        if (!ws.isEmpty()) root.addView(text("Before Match 360s: open DJI Fly's album and scroll past today's 360s.", 12, C_MUTED, false));
     }
 
     private interface MatchDone {
